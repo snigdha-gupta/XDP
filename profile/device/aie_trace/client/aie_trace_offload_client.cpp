@@ -18,6 +18,7 @@
 #define XDP_PLUGIN_SOURCE
 
 #include <iostream>
+#include <sstream>
 
 #include "core/common/message.h"
 #include "core/include/xrt/xrt_kernel.h"
@@ -123,7 +124,15 @@ namespace xdp {
       XAie_DmaDesc DmaDesc;
       loc = XAie_TileLoc(traceGMIO->shimColumn, 0);
       uint8_t s2mm_ch_id = traceGMIO->channelNumber;
-      uint16_t s2mm_bd_id = 15; /* for now use last bd */
+      // For client, use metadata BD if available, else default to 15
+      // (typically --num-trace-streams=1, meaning only one trace channel)
+      uint16_t s2mm_bd_id = (traceGMIO->bufferDescriptorId != UINT16_MAX) 
+                           ? traceGMIO->bufferDescriptorId 
+                           : 15;
+      std::stringstream bdMsg;
+      bdMsg << "AIE Trace: Using BD " << s2mm_bd_id << " for channel " << (int)s2mm_ch_id
+            << " on shim column " << (int)traceGMIO->shimColumn;
+      xrt_core::message::send(severity_level::debug, "XRT", bdMsg.str());
 
       // S2MM BD
       RC = XAie_DmaDescInit(&aieDevInst, &DmaDesc, loc);

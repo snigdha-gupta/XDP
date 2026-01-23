@@ -129,7 +129,7 @@ namespace xdp {
       isFullELFFlow = xrt_core::hw_context_int::get_elf_flow(hwContext);
     } catch (const std::exception& e) {
       std::stringstream msg;
-      msg << e.what() << " ML Timeline cannot be enabled for current hardware context." << std::endl;   
+      msg << e.what() << " ML Timeline cannot be enabled before complete configuration." << std::endl;
       xrt_core::message::send(xrt_core::message::severity_level::warning, "XRT", msg.str());
       return;
     }
@@ -137,6 +137,10 @@ namespace xdp {
     uint64_t deviceId = 0;
     uint64_t implId   = 0;
     if (isFullELFFlow) {
+      /* For Full ELF flow, debug buffer configuration happens only once
+       * for a fully configured HWCtx, even if multiple elfs are loaded.
+       * For now, number of uCs in the first ELF is considered.
+       */
       xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "In Full ELF flow");
 
       deviceId = (db->getStaticInfo()).getHwCtxImplUidElf(hwCtxImpl);

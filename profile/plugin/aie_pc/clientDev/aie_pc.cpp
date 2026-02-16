@@ -38,9 +38,12 @@
 #include "core/include/xclbin.h"
 
 extern "C" {
-  #include <xaiengine.h>
-  #include <xaiengine/xaiegbl_params.h>
+  #include "xdp/profile/device/common/xdp_aie_driver.h"
+#ifdef XDP_USE_AIE_CODEGEN
+  #include <events/xaie_events_aie.h>
+#else
   #include <xaiengine/xaie_events_aie.h>
+#endif
 }
 
 namespace xdp {

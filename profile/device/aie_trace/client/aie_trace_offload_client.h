@@ -28,8 +28,7 @@
 
 
 extern "C" {
-  #include <xaiengine.h>
-  #include <xaiengine/xaiegbl_params.h>
+  #include "xdp/profile/device/common/xdp_aie_driver.h"
 }
 
 namespace xdp {

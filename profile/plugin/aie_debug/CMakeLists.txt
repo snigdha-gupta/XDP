@@ -7,6 +7,17 @@
 # on Edge, Client, and VE2 platforms that support AIE.
 # Note it is not built or supported on x86.
 # ====================================================================
+# Support both aie-codegen and aie-rt: prefer aie_codegen when available
+if (TARGET aie_codegen)
+  set(AIE_DRIVER_LIB aie_codegen)
+  set(AIE_DRIVER_INCLUDE_DIRS)
+elseif (DEFINED AIE_CODEGEN_DIR)
+  set(AIE_DRIVER_LIB aie_codegen)
+  set(AIE_DRIVER_INCLUDE_DIRS ${AIE_CODEGEN_DIR}/include ${AIE_CODEGEN_DIR}/include/aie_codegen_inc ${AIE_CODEGEN_DIR}/../aie-regdb/globalparams)
+else()
+  set(AIE_DRIVER_LIB xaiengine)
+  set(AIE_DRIVER_INCLUDE_DIRS ${AIERT_DIR}/include)
+endif()
 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_debug/ve2")
@@ -34,9 +45,15 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX="on" XDP_VE2_BUILD=1)
+  if (AIE_DRIVER_INCLUDE_DIRS)
+    target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIE_DRIVER_INCLUDE_DIRS})
+  endif()
   target_include_directories(xdp_aie_debug_plugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  if (TARGET aie_codegen)
+    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
+  endif()
   
   install (TARGETS xdp_aie_debug_plugin
     RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
@@ -46,9 +63,14 @@ if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
 elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
-  target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIERT_DIR}/include)
+  if (AIE_DRIVER_INCLUDE_DIRS)
+    target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIE_DRIVER_INCLUDE_DIRS})
+  endif()
+  if (TARGET aie_codegen)
+    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
+  endif()
   set_target_properties(xdp_aie_debug_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
   install (TARGETS xdp_aie_debug_plugin
@@ -59,7 +81,13 @@ elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
 elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  if (AIE_DRIVER_INCLUDE_DIRS)
+    target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIE_DRIVER_INCLUDE_DIRS})
+  endif()
+  if (TARGET aie_codegen)
+    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
+  endif()
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX="on")
   set_target_properties(xdp_aie_debug_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 

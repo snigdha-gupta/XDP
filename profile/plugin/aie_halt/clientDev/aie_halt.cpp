@@ -34,8 +34,12 @@
 #include "core/include/xclbin.h"
 
 extern "C" {
-  #include <xaiengine.h>
+  #include "xdp/profile/device/common/xdp_aie_driver.h"
+#ifdef XDP_USE_AIE_CODEGEN
+  #include <xaiemlgbl_params.h>
+#else
   #include <xaiengine/xaiemlgbl_params.h>
+#endif
 }
 
 #ifdef _WIN32

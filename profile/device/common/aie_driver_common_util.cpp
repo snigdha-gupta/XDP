@@ -28,8 +28,7 @@
 #include <set>
 
 extern "C" {
-#include <xaiengine.h>
-#include <xaiengine/xaiegbl_params.h>
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 }
 
 #include "core/common/message.h"

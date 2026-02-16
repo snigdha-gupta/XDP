@@ -3,7 +3,7 @@
 #ifndef __OPINIT_HPP__
 #define __OPINIT_HPP__
 
-#include <xaiengine.h>
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 #include "op_types.h"
 #include <cstring>

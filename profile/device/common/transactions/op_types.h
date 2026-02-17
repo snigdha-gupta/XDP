@@ -4,7 +4,7 @@
 #define __OP_TYPES_H__
 
 /* Following headers are not needed anymore.
- * aie-codegen (or aie-rt) provides required declarations.
+ * aie-codegen provides required declarations.
  */
 /*
 #include "op_defs.h"
@@ -37,9 +37,7 @@ typedef struct {
     char msg[DEBUG_STR_MAX_LEN];
 } print_op_t;
 
-/* Following typedef declarations are now available
- * in aie-codegen (or updated aie-rt submodule).
- */
+/* Following typedef declarations are now available in aie-codegen. */
 /*
 typedef struct {
     uint32_t word;

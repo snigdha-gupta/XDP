@@ -6,7 +6,7 @@
 # This builds the AIE Halt Plugin to add Debug Halts for all AIE Cores at 
 # the start. It is currently built on Client and VE2
 # =========================================================================
-# Support both aie-codegen and aie-rt: prefer aie_codegen when available
+# aie-codegen only for host/NPU; edge uses sysroot xaiengine (no extra includes)
 if (TARGET aie_codegen)
   set(AIE_DRIVER_LIB aie_codegen)
   set(AIE_DRIVER_INCLUDE_DIRS)
@@ -15,7 +15,7 @@ elseif (DEFINED AIE_CODEGEN_DIR)
   set(AIE_DRIVER_INCLUDE_DIRS ${AIE_CODEGEN_DIR}/include ${AIE_CODEGEN_DIR}/include/aie_codegen_inc ${AIE_CODEGEN_DIR}/../aie-regdb/globalparams)
 else()
   set(AIE_DRIVER_LIB xaiengine)
-  set(AIE_DRIVER_INCLUDE_DIRS ${AIERT_DIR}/include)
+  set(AIE_DRIVER_INCLUDE_DIRS)
 endif()
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
@@ -47,8 +47,11 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   if (AIE_DRIVER_INCLUDE_DIRS)
     target_include_directories(xdp_aie_halt_plugin PRIVATE ${AIE_DRIVER_INCLUDE_DIRS})
   endif()
-  if (TARGET aie_codegen)
+  if (TARGET aie_codegen OR DEFINED AIE_CODEGEN_DIR)
     target_compile_definitions(xdp_aie_halt_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
+  endif()
+  if (DEFINED AIE_CODEGEN_DIR)
+    target_link_directories(xdp_aie_halt_plugin PRIVATE ${AIE_CODEGEN_DIR})
   endif()
   set_target_properties(xdp_aie_halt_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 

@@ -23,9 +23,7 @@
 #include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
 #include "xdp/profile/plugin/vp_base/vp_base_plugin.h"
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 namespace xdp {
 

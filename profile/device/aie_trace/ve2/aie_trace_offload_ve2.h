@@ -19,11 +19,7 @@
 #define XDP_PROFILE_AIE_TRACE_OFFLOAD_VE2_H_
 
 #include "xdp/profile/device/tracedefs.h"
-
-extern "C"
-{
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
 

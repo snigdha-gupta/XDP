@@ -19,10 +19,7 @@
 
 #include "xdp/config.h"
 #include "xdp/profile/plugin/aie_pc/aie_pc_impl.h"
-
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 #include<map>
 

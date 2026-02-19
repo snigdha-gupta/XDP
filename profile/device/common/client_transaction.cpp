@@ -23,9 +23,7 @@
 
 #include "transactions/op_buf.hpp"
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 // ***************************************************************
 // Anonymous namespace for helper functions local to this file

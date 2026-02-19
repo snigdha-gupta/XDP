@@ -9,10 +9,7 @@
 #include <unordered_map>
 #include "xdp/profile/plugin/aie_profile/aie_profile_defs.h"
 #include "xdp/profile/database/static_info/aie_constructs.h"
-
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 namespace xdp::aie::profile {
 

@@ -37,14 +37,14 @@
 #include "core/common/api/xclbin_int.h"
 #include "core/include/xclbin.h"
 
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 #ifdef XDP_USE_AIE_CODEGEN
-  #include <events/xaie_events_aie.h>
+#include <events/xaie_events_aie.h>
 #else
-  #include <xaiengine/xaie_events_aie.h>
-#endif
+extern "C" {
+#include <xaiengine/xaie_events_aie.h>
 }
+#endif
 
 namespace xdp {
 

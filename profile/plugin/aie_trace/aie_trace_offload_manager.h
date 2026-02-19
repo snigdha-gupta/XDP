@@ -24,9 +24,7 @@
 #include "xdp/profile/device/aie_trace/aie_trace_offload.h"
 #endif
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 
 namespace xdp {

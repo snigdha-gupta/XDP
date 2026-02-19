@@ -8,9 +8,7 @@
 #include "xdp/profile/database/static_info/aie_constructs.h"
 #include "xdp/profile/plugin/aie_trace/aie_trace_metadata.h"
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 namespace xdp::aie::trace {
   /**

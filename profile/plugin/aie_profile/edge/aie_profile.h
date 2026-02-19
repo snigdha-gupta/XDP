@@ -11,9 +11,7 @@
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
 #include "xaiefal/xaiefal.hpp"
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 namespace xdp {
   using tile_type = xdp::tile_type;

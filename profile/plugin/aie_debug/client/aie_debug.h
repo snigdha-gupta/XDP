@@ -16,9 +16,7 @@
 
 #include "core/include/xrt/xrt_hw_context.h"
 
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
   class ClientReadableTile;

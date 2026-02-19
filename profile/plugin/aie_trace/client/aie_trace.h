@@ -11,9 +11,7 @@
 #include "xdp/profile/plugin/aie_trace/aie_trace_impl.h"
 #include "xdp/profile/device/common/client_transaction.h"
 
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
   class AieTrace_WinImpl : public AieTraceImpl {

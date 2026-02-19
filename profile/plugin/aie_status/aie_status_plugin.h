@@ -32,14 +32,14 @@
 #include "xdp/profile/database/static_info/filetypes/base_filetype_impl.h"
 #include "xdp/profile/plugin/vp_base/vp_base_plugin.h"
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
 #ifdef XDP_USE_AIE_CODEGEN
 #include <common/xaie_helper.h>
 #else
+extern "C" {
 #include "xaiengine/xaie_helper.h"
-#endif
 }
+#endif
 
 namespace xdp {
 

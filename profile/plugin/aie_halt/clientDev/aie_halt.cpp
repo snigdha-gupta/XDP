@@ -33,14 +33,14 @@
 #include "core/common/api/xclbin_int.h"
 #include "core/include/xclbin.h"
 
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 #ifdef XDP_USE_AIE_CODEGEN
-  #include <xaiemlgbl_params.h>
+#include <xaiemlgbl_params.h>
 #else
-  #include <xaiengine/xaiemlgbl_params.h>
-#endif
+extern "C" {
+#include <xaiengine/xaiemlgbl_params.h>
 }
+#endif
 
 #ifdef _WIN32
 # pragma warning ( disable : 4244 )

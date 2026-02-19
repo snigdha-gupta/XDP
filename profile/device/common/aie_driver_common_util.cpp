@@ -27,9 +27,7 @@
 #include <regex>
 #include <set>
 
-extern "C" {
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
 
 #include "core/common/message.h"
 

@@ -17,9 +17,7 @@
 #include "core/edge/common/aie_parser.h"
 #include "xaiefal/xaiefal.hpp"
 
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
   class EdgeReadableTile;

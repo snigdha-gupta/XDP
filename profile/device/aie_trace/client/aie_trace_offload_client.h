@@ -25,11 +25,7 @@
 #include "xdp/profile/device/common/client_transaction.h"
 #include "xdp/profile/device/tracedefs.h"
 #include "xdp/profile/plugin/aie_trace/aie_trace_metadata.h"
-
-
-extern "C" {
-  #include "xdp/profile/device/common/xdp_aie_driver.h"
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
 

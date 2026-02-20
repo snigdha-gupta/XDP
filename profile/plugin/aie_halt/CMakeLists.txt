@@ -6,12 +6,7 @@
 # This builds the AIE Halt Plugin to add Debug Halts for all AIE Cores at 
 # the start. It is currently built on Client and VE2
 # =========================================================================
-# aie-codegen submodule for host/NPU; edge uses sysroot xaiengine
-if (TARGET aie_codegen)
-  set(AIE_DRIVER_LIB aie_codegen)
-else()
-  set(AIE_DRIVER_LIB xaiengine)
-endif()
+# Client flow: aie_codegen. Edge: N/A; VE2 does not link AIE driver here.
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_halt/clientDev")
@@ -37,7 +32,7 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   xrt_configure_version_file(xdp_aie_halt_plugin SHARED)
   add_library(xdp_aie_halt_plugin SHARED xdp_aie_halt_plugin-version.rc ${XDP_AIE_HALT_PLUGIN_FILES} ${XDP_DEVICE_COMMON_FILES})
   add_dependencies(xdp_aie_halt_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_halt_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_halt_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_halt_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_halt_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)

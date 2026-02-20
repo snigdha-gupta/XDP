@@ -7,12 +7,7 @@
 # Edge-Versal systems, client and ve2 but not Edge-aarch64.  It also has a dependency
 # on the hardware shim
 # ====================================================================
-# aie-codegen submodule for host/NPU; edge uses sysroot xaiengine
-if (TARGET aie_codegen)
-  set(AIE_DRIVER_LIB aie_codegen)
-else()
-  set(AIE_DRIVER_LIB xaiengine)
-endif()
+# Client flow: aie_codegen; Edge flow: xaiengine. VE2 handled in its block below.
 
 file(GLOB AIE_TRACE_PLUGIN_FILES
   "${PROFILE_DIR}/plugin/aie_trace/*.h"
@@ -54,7 +49,7 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_trace_plugin SHARED xdp_aie_trace_plugin-version.rc
     ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES})
   add_dependencies(xdp_aie_trace_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
@@ -95,6 +90,12 @@ elseif (DEFINED XRT_AIE_BUILD AND (NOT XRT_EDGE))
 
 else()
   if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
+    # VE2: driver lib TBD later
+    if (TARGET aie_codegen)
+      set(AIE_DRIVER_LIB aie_codegen)
+    else()
+      set(AIE_DRIVER_LIB xaiengine)
+    endif()
     set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_trace/ve2")
     set(OFFLOAD_DIR "${PROFILE_DIR}/device/aie_trace/ve2")
     set(DEVICE_DIR "${PROFILE_DIR}/device/hal_device")
@@ -140,7 +141,7 @@ else()
 
     add_library(xdp_aie_trace_plugin SHARED ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_TRACE_CONFIG_FILES})
     add_dependencies(xdp_aie_trace_plugin xdp_core xrt_coreutil)
-    target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+    target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
     if (TARGET aie_codegen)
       target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
     endif()

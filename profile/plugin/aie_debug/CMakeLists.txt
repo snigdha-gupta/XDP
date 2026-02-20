@@ -7,12 +7,7 @@
 # on Edge, Client, and VE2 platforms that support AIE.
 # Note it is not built or supported on x86.
 # ====================================================================
-# aie-codegen submodule for host/NPU; edge uses sysroot xaiengine
-if (TARGET aie_codegen)
-  set(AIE_DRIVER_LIB aie_codegen)
-else()
-  set(AIE_DRIVER_LIB xaiengine)
-endif()
+# Client flow: aie_codegen; Edge flow: xaiengine. VE2 handled in its block below.
 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_debug/ve2")
@@ -38,6 +33,12 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
 )
 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
+  # VE2: driver lib TBD later
+  if (TARGET aie_codegen)
+    set(AIE_DRIVER_LIB aie_codegen)
+  else()
+    set(AIE_DRIVER_LIB xaiengine)
+  endif()
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
@@ -55,7 +56,7 @@ if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
 elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
@@ -70,7 +71,7 @@ elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
 elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
   endif()

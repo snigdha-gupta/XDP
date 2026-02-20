@@ -7,12 +7,7 @@
 # to count cycles between core function start and end.
 # It is currently built on Client Windows Only.
 # =========================================================================
-# aie-codegen submodule for host/NPU; edge uses sysroot xaiengine
-if (TARGET aie_codegen)
-  set(AIE_DRIVER_LIB aie_codegen)
-else()
-  set(AIE_DRIVER_LIB xaiengine)
-endif()
+# Client flow only: aie_codegen.
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_pc/clientDev")
@@ -36,7 +31,7 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_pc_plugin SHARED xdp_aie_pc_plugin-version.rc
     ${XDP_AIE_PC_PLUGIN_FILES} ${XDP_DEVICE_COMMON_FILES})
   add_dependencies(xdp_aie_pc_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_pc_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_pc_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_pc_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_pc_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)

@@ -6,12 +6,7 @@
 # This builds the AIE Status plugin.  It is currently built on
 # Edge and VE2 platforms that support AIE.
 # ====================================================================
-# aie-codegen submodule for host/NPU; edge uses sysroot xaiengine
-if (TARGET aie_codegen)
-  set(AIE_DRIVER_LIB aie_codegen)
-else()
-  set(AIE_DRIVER_LIB xaiengine)
-endif()
+# Client: N/A. Edge flow: xaiengine; VE2 handled in its block below.
 
 file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/plugin/aie_status/*.h"
@@ -21,6 +16,12 @@ file(GLOB AIE_STATUS_PLUGIN_FILES
 )
 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
+  # VE2: driver lib TBD later
+  if (TARGET aie_codegen)
+    set(AIE_DRIVER_LIB aie_codegen)
+  else()
+    set(AIE_DRIVER_LIB xaiengine)
+  endif()
   add_library(xdp_aie_status_plugin SHARED ${AIE_STATUS_PLUGIN_FILES})
   add_dependencies(xdp_aie_status_plugin xdp_core)
   target_link_libraries(xdp_aie_status_plugin PRIVATE xdp_core ${AIE_DRIVER_LIB})
@@ -39,7 +40,7 @@ if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
 elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
   add_library(xdp_aie_status_plugin SHARED ${AIE_STATUS_PLUGIN_FILES})
   add_dependencies(xdp_aie_status_plugin xdp_core)
-  target_link_libraries(xdp_aie_status_plugin PRIVATE xdp_core ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_status_plugin PRIVATE xdp_core xaiengine)
   if (TARGET aie_codegen)
     target_compile_definitions(xdp_aie_status_plugin PRIVATE XDP_USE_AIE_CODEGEN=1)
   endif()

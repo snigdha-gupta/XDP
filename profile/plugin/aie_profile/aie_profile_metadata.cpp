@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. - All rights reserved
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. - All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License"). You may
  * not use this file except in compliance with the License. A copy of the
@@ -21,12 +21,18 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
+#include <filesystem>
 
 #include "core/common/config_reader.h"
 #include "core/common/device.h"
 #include "core/common/message.h"
 #include "xdp/profile/database/database.h"
 #include "xdp/profile/plugin/vp_base/vp_base_plugin.h"
+#include "xdp/profile/database/parser/metrics.h"
+#include "xdp/profile/database/parser/json_parser.h"
+#include "xdp/profile/database/parser/metrics_collection_manager.h"
+#include "xdp/profile/database/parser/metrics_factory.h"
+#include "xdp/profile/database/parser/parser_utils.h"
 
 namespace xdp {
   using severity_level = xrt_core::message::severity_level;
@@ -51,14 +57,80 @@ namespace xdp {
     checkSettings();
 
     configMetrics.resize(NUM_MODULES);
-    // Get polling interval (in usec)
-    pollingInterval = xrt_core::config::get_aie_profile_settings_interval_us();
-
+    
     // Setup Config Metrics
     // Get AIE clock frequency
     clockFreqMhz = (db->getStaticInfo()).getClockRateMHz(deviceID, false);
 
-    // Tile-based metrics settings
+    bool useXdpJson = false;
+    std::string settingFile = xrt_core::config::get_xdp_json();
+    PluginJsonSetting pluginSettings;
+    
+    if (!settingFile.empty() && SettingsJsonParser::getInstance().isValidJson(settingFile)) {
+      xrt_core::message::send(severity_level::info, "XRT",
+        "Using JSON settings from '" + settingFile + "'");
+      
+      XdpJsonSetting XdpJsonSetting = SettingsJsonParser::getInstance().parseXdpJsonSetting(settingFile, info::aie_profile);
+      if (!XdpJsonSetting.isValid) {
+        xrt_core::message::send(severity_level::warning, "XRT",
+          "Unable to parse aie_profile JSON settings from " + settingFile +
+          ". Error: " + XdpJsonSetting.errorMessage + ". Falling back to xrt.ini settings.");
+        useXdpJson = false;
+      } else {
+        // Process only AIE_PROFILE plugin configuration
+        auto it = XdpJsonSetting.plugins.find(info::aie_profile);
+        if (it != XdpJsonSetting.plugins.end()) {
+          pluginSettings = it->second;
+          useXdpJson = true;
+        } else {
+          xrt_core::message::send(severity_level::info, "XRT",
+             "No valid aie_profile configuration found in JSON settings. Falling back to xrt.ini settings.");
+          useXdpJson = false;
+        }
+      }
+    }
+
+    // Process settings based on configuration source
+    if (useXdpJson) {
+        // Use JSON settings for fine-grained settings
+        if (pluginSettings.settings.hasIntervalUs()) {
+            pollingInterval = pluginSettings.settings.intervalUs.value();
+            xrt_core::message::send(severity_level::debug, "XRT",
+                "Using JSON polling interval: " + std::to_string(pollingInterval) + " microseconds");
+        } else {
+            // Use default if not specified in JSON
+            pollingInterval = 1000; // Default 1ms
+        }
+        
+        // Set profile start control using JSON settings
+        setProfileStartControl(compilerOptions.graph_iterator_event, useXdpJson, &pluginSettings);
+        
+        // Process JSON plugin configuration for metrics
+        MetricsCollectionManager metricsCollectionManager;
+        processPluginJsonSetting(pluginSettings, metricsCollectionManager);
+        
+        // Process all module types using JSON settings only
+        for (int module = 0; module < NUM_MODULES; ++module) {
+            auto type = moduleTypes[module];
+            getConfigMetricsUsingJson(module, type, metricsCollectionManager);
+        }
+        
+        xrt_core::message::send(severity_level::debug,
+                                "XRT", "Finished Parsing AIE Profile Metadata using JSON settings.");
+        return; // Early return - skip all xrt.ini parsing
+    }
+
+    // ============================================================================
+    // From this point on, only xrt.ini settings are processed
+    // ============================================================================
+    
+    // Use xrt.ini settings for fine-grained settings
+    pollingInterval = xrt_core::config::get_aie_profile_settings_interval_us();
+    
+    // Set profile start control using xrt.ini settings
+    setProfileStartControl(compilerOptions.graph_iterator_event, useXdpJson, nullptr);
+ 
+    // Tile-based metrics settings from xrt.ini
     std::vector<std::string> tileMetricsConfig;
     tileMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_tile_based_aie_metrics());
     tileMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_tile_based_aie_memory_metrics());
@@ -66,7 +138,7 @@ namespace xdp {
     tileMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_tile_based_memory_tile_metrics());
     tileMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_tile_based_microcontroller_metrics());
 
-    // Graph-based metrics settings
+    // Graph-based metrics settings from xrt.ini
     std::vector<std::string> graphMetricsConfig;
     graphMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_graph_based_aie_metrics());
     graphMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_graph_based_aie_memory_metrics());
@@ -75,33 +147,76 @@ namespace xdp {
     //graphMetricsConfig.push_back(xrt_core::config::get_aie_profile_settings_graph_based_microcontroller_metrics());
     graphMetricsConfig.push_back("");
 
-    setProfileStartControl(compilerOptions.graph_iterator_event);
-    
-    // Process all module types
+    // Process all module types using xrt.ini settings only
     for (int module = 0; module < NUM_MODULES; ++module) {
-      auto type = moduleTypes[module];
-      auto metricsSettings      = getSettingsVector(tileMetricsConfig[module]);
-      auto graphMetricsSettings = getSettingsVector(graphMetricsConfig[module]);
+        auto type = moduleTypes[module];
+        auto metricsSettings      = getSettingsVector(tileMetricsConfig[module]);
+        auto graphMetricsSettings = getSettingsVector(graphMetricsConfig[module]);
 
-      if (type == module_type::shim)
-        getConfigMetricsForInterfaceTiles(module, metricsSettings, graphMetricsSettings);
-      else if (type == module_type::uc)
-        getConfigMetricsForMicrocontrollers(module, metricsSettings, graphMetricsSettings);
-      else
-        getConfigMetricsForTiles(module, metricsSettings, graphMetricsSettings, type);
+        if (type == module_type::shim)
+            getConfigMetricsForInterfaceTiles(module, metricsSettings, graphMetricsSettings);
+        else if (type == module_type::uc)
+            getConfigMetricsForMicrocontrollers(module, metricsSettings, graphMetricsSettings);
+        else
+            getConfigMetricsForTiles(module, metricsSettings, graphMetricsSettings, type);
     }
 
-    // Graph-based Profile APIs support metrics settings
+    // Graph-based Profile APIs support metrics settings from xrt.ini
     std::string intfTilesLatencyUserSettings = xrt_core::config::get_aie_profile_settings_interface_tile_latency_metrics();
     if (!intfTilesLatencyUserSettings.empty()) {
-      auto latencyMetricsSettings = getSettingsVector(intfTilesLatencyUserSettings);
-      getConfigMetricsForintfTilesLatencyConfig(module_type::shim, latencyMetricsSettings);
+        auto latencyMetricsSettings = getSettingsVector(intfTilesLatencyUserSettings);
+        getConfigMetricsForintfTilesLatencyConfig(module_type::shim, latencyMetricsSettings);
     }
 
     xrt_core::message::send(severity_level::info,
-                            "XRT", "Finished Parsing AIE Profile Metadata."); 
+                            "XRT", "Finished Parsing AIE Profile Metadata using xrt.ini settings.");
   }
+ 
+  void AieProfileMetadata::processPluginJsonSetting(const PluginJsonSetting& config, 
+                                             MetricsCollectionManager& manager)
+  {
+      for (const auto& [sectionKey, modules] : config.sections) {
+          for (const auto& [moduleKey, metrics] : modules) {
 
+              bool isGraphsType = (sectionKey == "graphs");
+              
+              // Handle plugin-specific module key mappings
+              std::string mappedModuleKey = moduleKey;
+              if (config.pluginType ==info::aie_trace) {
+                  // Map aie_trace modules to aie_profile equivalents if needed
+                  if (moduleKey == "aie_tile") {
+                      // Handle aie_tile differently - might need special processing
+                  }
+              }
+              
+              MetricType type        = getMetricTypeFromKey(sectionKey, mappedModuleKey);
+              module_type moduleType = getModuleTypeFromKey(mappedModuleKey);
+              
+              MetricCollection collection;
+              for (const auto& metricData : metrics) {
+                  auto metric = MetricsFactory::createMetric(type, metricData);
+                  if (!metric) {
+                        xrt_core::message::send(severity_level::warning, "XRT",
+                        "Failed to create metric for type: " + std::to_string(static_cast<int>(type)));
+                      continue;
+                  }
+                  
+                  if (jsonContainsAllRange(type, metricData)) {
+                      metric->setAllTiles(true);
+                  } else if (jsonContainsRange(type, metricData)) {
+                      metric->setTilesRange(true);
+                  }
+                  
+                  collection.addMetric(std::move(metric));
+              }
+              if (isGraphsType)
+                collection.setGraphBased(true);
+              
+              manager.addMetricCollection(moduleType, moduleKey, std::move(collection));
+          }
+      }
+  }
+  
   /****************************************************************************
    * Compare tiles (used for sorting)
    ***************************************************************************/
@@ -1358,6 +1473,44 @@ namespace xdp {
       else {
         // Start profile when graph iterator reaches a threshold
         iterationCount = xrt_core::config::get_aie_profile_settings_start_iteration();
+        useGraphIterator = (iterationCount != 0);
+      }
+    }
+  }
+
+  // Parse Profile start_type configuration with JSON support
+  void AieProfileMetadata::setProfileStartControl(bool graphIteratorEvent, bool useXdpJson, const PluginJsonSetting* pluginSettings)
+  {
+    useGraphIterator = false;
+    
+    std::string startType;
+    
+    if (useXdpJson && pluginSettings && pluginSettings->settings.hasStartType()) {
+      // Use JSON setting for start type
+      startType = pluginSettings->settings.startType.value();
+      xrt_core::message::send(severity_level::debug, "XRT",
+          "Using JSON start type: " + startType);
+    } else {
+      // Use xrt.ini setting for start type
+      startType = xrt_core::config::get_aie_profile_settings_start_type();
+    }
+    
+    if (startType == "iteration") {
+      // Verify AIE was compiled with the proper setting
+      if (!graphIteratorEvent) {
+        std::string msg = "Unable to use graph iteration as profile start type. ";
+        msg.append("Please re-compile AI Engine with --graph-iterator-event=true.");
+        xrt_core::message::send(severity_level::warning, "XRT", msg);
+      }
+      else {
+        // Start profile when graph iterator reaches a threshold
+        if (useXdpJson && pluginSettings && pluginSettings->settings.hasStartIteration()) {
+          iterationCount = pluginSettings->settings.startIteration.value();
+          xrt_core::message::send(severity_level::debug, "XRT",
+              "Using JSON start iteration: " + std::to_string(iterationCount));
+        } else {
+          iterationCount = xrt_core::config::get_aie_profile_settings_start_iteration();
+        }
         useGraphIterator = (iterationCount != 0);
       }
     }

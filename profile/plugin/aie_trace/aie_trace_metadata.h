@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. - All rights reserved
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. - All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License"). You may
  * not use this file except in compliance with the License. A copy of the
@@ -31,6 +31,9 @@
 #include "core/common/message.h"
 #include "core/common/system.h"
 #include "core/include/xrt/xrt_hw_context.h"
+#include "xdp/profile/database/parser/metrics.h"
+#include "xdp/profile/database/parser/metrics_collection_manager.h"
+#include "xdp/profile/database/parser/json_parser.h"
 
 namespace xdp {
 
@@ -51,6 +54,26 @@ class AieTraceMetadata {
     void getConfigMetricsForInterfaceTiles(const std::vector<std::string>& metricsSettings,
                                            const std::vector<std::string> graphMetricsSettings);
     xdp::aie::driver_config getAIEConfigMetadata();
+
+    // JSON-based configuration methods
+    void getConfigMetricsUsingJson(const int module, const module_type type,
+                                   MetricsCollectionManager& metricsCollectionManager);
+    void getConfigMetricsForTilesUsingJson(const int moduleIdx, const module_type mod,
+                                           MetricsCollectionManager& metricsCollectionManager);
+    void getConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx,
+                                                    MetricsCollectionManager& metricsCollectionManager);
+    void populateGraphConfigMetricsForTilesUsingJson(const int moduleIdx, const module_type mod,
+                                                     MetricsCollectionManager& metricsCollectionManager);
+    void populateTilesConfigMetricsForTilesUsingJson(const int moduleIdx, const module_type mod,
+                                                     MetricsCollectionManager& metricsCollectionManager);
+    void populateGraphConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx, const module_type mod,
+                                                              MetricsCollectionManager& metricsCollectionManager);
+    void populateTilesConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx, const module_type mod,
+                                                             MetricsCollectionManager& metricsCollectionManager);
+    
+    // Plugin JSON settings processing
+    void processPluginJsonSetting(const PluginJsonSetting& config, 
+                                  MetricsCollectionManager& manager);
 
    public:
     int getHardwareGen() {

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. - All rights reserved
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. - All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License"). You may
  * not use this file except in compliance with the License. A copy of the
@@ -29,6 +29,9 @@
 #include "xdp/profile/database/static_info/aie_util.h"
 #include "xdp/profile/database/static_info/filetypes/base_filetype_impl.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_defs.h"
+#include "xdp/profile/database/parser/metrics.h"
+#include "xdp/profile/database/parser/json_parser.h"
+#include "xdp/profile/database/parser/metrics_collection_manager.h"
 
 namespace xdp {
 
@@ -147,6 +150,32 @@ class AieProfileMetadata {
     void getConfigMetricsForMicrocontrollers(const int moduleIdx,
                                              const std::vector<std::string>& metricsSettings,
                                              const std::vector<std::string> graphMetricsSettings);
+
+    // Functions to configure settings derieved from JSON
+    void getConfigMetricsUsingJson(const int module, const module_type type,
+                                  MetricsCollectionManager& metricsCollectionManager);
+    void getConfigMetricsForTilesUsingJson(const int moduleIdx,
+                                           const module_type mod,
+                                           MetricsCollectionManager& metricsCollectionManager);
+    void populateGraphConfigMetricsForTilesUsingJson(const int moduleIdx, const module_type mod,
+                            MetricsCollectionManager& metricsCollectionManager);
+    void populateTilesConfigMetricsForTilesUsingJson(const int moduleIdx, 
+      const module_type mod, MetricsCollectionManager& metricsCollectionManager);
+
+    void getConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx,
+                                           MetricsCollectionManager& metricsCollectionManager);
+    void populateGraphConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx,
+                                                      const module_type mod,
+                                                      MetricsCollectionManager& metricsCollectionManager);
+
+    void populateTilesConfigMetricsForInterfaceTilesUsingJson(const int moduleIdx,
+                                                          const module_type mod,
+                                                          MetricsCollectionManager& metricsCollectionManager);
+
+    void getConfigMetricsForMicrocontrollersUsingJson(const int moduleIdx,
+                                                      MetricsCollectionManager& metricsCollectionManager);
+    void processPluginJsonSetting(const PluginJsonSetting& config, MetricsCollectionManager& manager);
+
     int getPairModuleIndex(const std::string& metricSet, module_type mod);
     uint8_t getMetricSetIndex(const std::string& metricSet, module_type mod);
     bool isSupported(const std::string metricSet, bool isTileBased);
@@ -187,6 +216,7 @@ class AieProfileMetadata {
     void getConfigMetricsForintfTilesLatencyConfig(xdp::module_type module,
                        const std::vector<std::string>& intfTilesLatencyConfigs);
     void setProfileStartControl(bool graphIteratorEvent);
+    void setProfileStartControl(bool graphIteratorEvent, bool useXdpJson, const PluginJsonSetting* pluginSettings);
     uint32_t processUserSpecifiedBytes(const std::string& strTotalBytes);
     uint32_t getUserSpecifiedThreshold(const tile_type& tile, const std::string& metricSet);
     void setUserSpecifiedBytes(const tile_type& tile, const uint32_t& threshold);

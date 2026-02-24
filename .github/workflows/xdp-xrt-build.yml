@@ -16,7 +16,8 @@ jobs:
     if: |
       github.event_name == 'push' || 
       contains(github.event.pull_request.labels.*.name, 'build-edge') 
-    runs-on: ubuntu-latest # or ubuntu-20.04 or something else?
+    runs-on: [self-hosted, petalinux]
+    # ubuntu-latest or ubuntu-20.04 or something else?
     timeout-minutes: 90
     
     steps:
@@ -47,7 +48,7 @@ jobs:
         
         # Show what changed
         cd $XDP_PATH
-        ls -la
+        git diff --stat
         
     - name: Setup Build Environment Using XRT Scripts
       run: |

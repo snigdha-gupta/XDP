@@ -6,7 +6,7 @@
 # This builds the AIE Halt Plugin to add Debug Halts for all AIE Cores at 
 # the start. It is currently built on Client and VE2
 # =========================================================================
-# Client flow: aie_codegen. Edge: N/A; VE2 does not link AIE driver here.
+# Client flow: aie_codegen. Edge: N/A; VE2 does not link AIE driver here since we load a prebuilt elf
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_halt/clientDev")

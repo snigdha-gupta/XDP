@@ -42,9 +42,6 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_dependencies(xdp_aie_profile_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_profile_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
-  if (XDP_USE_AIE_CODEGEN)
-    target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
-  endif()
   set_target_properties(xdp_aie_profile_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
   install (TARGETS xdp_aie_profile_plugin
@@ -76,12 +73,6 @@ elseif (DEFINED XRT_AIE_BUILD AND (NOT XRT_EDGE))
 else()
 
   if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-    # VE2: driver lib TBD later
-    if (XDP_USE_AIE_CODEGEN)
-      set(AIE_DRIVER_LIB aie_codegen)
-    else()
-      set(AIE_DRIVER_LIB xaiengine)
-    endif()
     set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_profile/ve2")
 
     file(GLOB AIE_PROFILE_IMPL_FILES
@@ -89,17 +80,26 @@ else()
       "${IMPL_DIR}/*.cpp"
     )
     add_library(xdp_aie_profile_plugin_xdna SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
+    add_library(xdp_aie_profile_plugin_zocl SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
     add_dependencies(xdp_aie_profile_plugin_xdna xdp_core xrt_coreutil)
-    target_link_libraries(xdp_aie_profile_plugin_xdna PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+    add_dependencies(xdp_aie_profile_plugin_zocl xdp_core xrt_coreutil)
+    target_link_libraries(xdp_aie_profile_plugin_xdna PRIVATE xdp_core xrt_coreutil aie_codegen)
+    target_link_libraries(xdp_aie_profile_plugin_zocl PRIVATE xdp_core xrt_coreutil xaiengine)
     target_compile_definitions(xdp_aie_profile_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on")
-    target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    if (XDP_USE_AIE_CODEGEN)
-      # Pass CMake variable to compiler so #ifdef XDP_USE_AIE_CODEGEN works in source.
-      target_compile_definitions(xdp_aie_profile_plugin_xdna PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
-    endif()
+    target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
+    target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src) # this uses aie_codegen include right? so we do not need this since:
+    # aie_codegen target sets PUBLIC target_include_directories (lines 53–61 in aie-codegen/src/CMakeLists.txt), 
+    # so any target that does target_link_libraries(… aie_codegen) gets those include paths automatically
+    target_include_directories(xdp_aie_profile_plugin_zocl PRIVATE ${CMAKE_SOURCE_DIR}/src)
     set_target_properties(xdp_aie_profile_plugin_xdna PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
+    set_target_properties(xdp_aie_profile_plugin_zocl PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
     install (TARGETS xdp_aie_profile_plugin_xdna
+      RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
+      LIBRARY DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT} ${XRT_NAMELINK_SKIP}
+    )
+
+    install (TARGETS xdp_aie_profile_plugin_zocl
       RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
       LIBRARY DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT} ${XRT_NAMELINK_SKIP}
     )
@@ -115,11 +115,7 @@ else()
     add_library(xdp_aie_profile_plugin SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
     add_dependencies(xdp_aie_profile_plugin xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_profile_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-    if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-      target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
-    else()
-      target_compile_definitions(xdp_aie_profile_plugin PRIVATE FAL_LINUX="on")
-    endif()
+    target_compile_definitions(xdp_aie_profile_plugin PRIVATE FAL_LINUX="on")
     set_target_properties(xdp_aie_profile_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
     install (TARGETS xdp_aie_profile_plugin
@@ -130,4 +126,13 @@ else()
 
 # Else, on edge-aarch64 don't build at all
 
+endif()
+
+set(AIE_PROFILE_CODEGEN_TARGETS xdp_aie_profile_plugin xdp_aie_profile_plugin_xdna xdp_aie_profile_plugin_zocl)
+if (XDP_USE_AIE_CODEGEN)
+  foreach(t IN LISTS AIE_PROFILE_CODEGEN_TARGETS)
+    if (TARGET ${t})
+      target_compile_definitions(${t} PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
+    endif()
+  endforeach()
 endif()

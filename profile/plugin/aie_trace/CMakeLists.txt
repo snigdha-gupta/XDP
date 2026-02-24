@@ -143,11 +143,7 @@ else()
     add_library(xdp_aie_trace_plugin SHARED ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_TRACE_CONFIG_FILES})
     add_dependencies(xdp_aie_trace_plugin xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-    if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-      target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
-    else()
-      target_compile_definitions(xdp_aie_trace_plugin PRIVATE FAL_LINUX="on")
-    endif()
+    target_compile_definitions(xdp_aie_trace_plugin PRIVATE FAL_LINUX="on")
     set_target_properties(xdp_aie_trace_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
     install (TARGETS xdp_aie_trace_plugin

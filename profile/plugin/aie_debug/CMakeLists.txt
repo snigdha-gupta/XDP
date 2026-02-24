@@ -32,21 +32,13 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
   "${PROFILE_DIR}/device/common/*.cpp"
 )
 
+// TODO: do we have to build both for VE2 debug build as well now?
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-  # VE2: driver lib TBD later
-  if (XDP_USE_AIE_CODEGEN)
-    set(AIE_DRIVER_LIB aie_codegen)
-  else()
-    set(AIE_DRIVER_LIB xaiengine)
-  endif()
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX="on" XDP_VE2_BUILD=1)
   target_include_directories(xdp_aie_debug_plugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
-  if (XDP_USE_AIE_CODEGEN)
-    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
-  endif()
   
   install (TARGETS xdp_aie_debug_plugin
     RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
@@ -58,9 +50,6 @@ elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
-  if (XDP_USE_AIE_CODEGEN)
-    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
-  endif()
   set_target_properties(xdp_aie_debug_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
   install (TARGETS xdp_aie_debug_plugin
@@ -72,9 +61,6 @@ elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-  if (XDP_USE_AIE_CODEGEN)
-    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
-  endif()
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX="on")
   set_target_properties(xdp_aie_debug_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
@@ -85,4 +71,8 @@ elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
 
 # Else, on edge-aarch64 don't build at all
 
+endif()
+
+if (TARGET xdp_aie_debug_plugin AND XDP_USE_AIE_CODEGEN)
+  target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
 endif()

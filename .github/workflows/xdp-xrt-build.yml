@@ -86,10 +86,11 @@ jobs:
         cd XRT/build
         
         # Make build script executable
-        chmod +x build_edge.sh
+        chmod +x build.sh
         
         # Build for versal
-        ./build_edge.sh -aarch versal
+        ./build.sh -noinit
+        #./build_edge.sh -aarch versal
         
     - name: Validate Build Output
       run: |

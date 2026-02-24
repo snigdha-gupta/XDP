@@ -32,7 +32,7 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
   "${PROFILE_DIR}/device/common/*.cpp"
 )
 
-// TODO: do we have to build both for VE2 debug build as well now?
+// TODO: for aie_debug, we don't support xdna so do we use xaiengine or aie_codegen
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)

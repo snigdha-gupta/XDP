@@ -15,16 +15,11 @@ file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/writer/aie_status/*.cpp"
 )
 
+// TODO: for aie_status, we don't support xdna so do we use xaiengine or aie_codegen
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-  # VE2: driver lib TBD later
-  if (XDP_USE_AIE_CODEGEN)
-    set(AIE_DRIVER_LIB aie_codegen)
-  else()
-    set(AIE_DRIVER_LIB xaiengine)
-  endif()
   add_library(xdp_aie_status_plugin SHARED ${AIE_STATUS_PLUGIN_FILES})
   add_dependencies(xdp_aie_status_plugin xdp_core)
-  target_link_libraries(xdp_aie_status_plugin PRIVATE xdp_core ${AIE_DRIVER_LIB})
+  target_link_libraries(xdp_aie_status_plugin PRIVATE xdp_core xaiengine)
   target_compile_definitions(xdp_aie_status_plugin PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on")
   target_include_directories(xdp_aie_status_plugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
   if (XDP_USE_AIE_CODEGEN)

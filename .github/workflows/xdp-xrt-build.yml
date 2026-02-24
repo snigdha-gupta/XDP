@@ -1,0 +1,157 @@
+name: XDP PR Build Test
+
+on:
+  # For testing - trigger on push to specific branch
+  push:
+    branches: [ test-ci ]  # test branch
+  # PR trigger for production use
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [ master ]
+
+jobs:
+  build-xrt-edge:
+  # For testing, always run on push. 
+  # Only run if the PR has 'build-edge' label
+    if: |
+      github.event_name == 'push' || 
+      contains(github.event.pull_request.labels.*.name, 'build-edge') 
+    runs-on: ubuntu-latest # or ubuntu-20.04 or something else?
+    timeout-minutes: 90
+    
+    steps:
+    - name: Checkout XDP PR
+      uses: actions/checkout@v4
+      with:
+        path: xdp-pr
+        fetch-depth: 0
+        
+    - name: Clone XRT Repository
+      run: |
+        git clone https://github.com/Xilinx/XRT.git XRT
+        cd XRT
+        git submodule update --init --recursive
+        
+    - name: Apply XDP PR Changes to XRT
+      run: |
+        # XDP is at XRT/src/runtime_src/xdp
+        XDP_PATH="XRT/src/runtime_src/xdp"
+        
+        echo "Applying XDP changes to: $XDP_PATH"
+        
+        # Remove existing XDP content
+        rm -rf $XDP_PATH/*
+        
+        # Copy PR changes to XDP location
+        cp -r xdp-pr/* $XDP_PATH/
+        
+        # Show what changed
+        cd $XDP_PATH
+        ls -la
+        
+    - name: Setup Build Environment Using XRT Scripts
+      run: |
+        # Navigate to XRT scripts directory
+        cd XRT/src/runtime_src/tools/scripts
+        
+        # Make the dependency script executable
+        chmod +x xrtdeps.sh
+        
+        # Install XRT dependencies
+        sudo ./xrtdeps.sh
+        
+        # Install cross-compilation tools for edge builds
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          crossbuild-essential-arm64
+        
+    - name: Build XRT for Edge (Versal)
+      run: |
+        cd XRT/build
+        
+        # Make build script executable
+        chmod +x build_edge.sh
+        
+        # Build for versal
+        ./build_edge.sh -aarch versal
+        
+    - name: Validate Build Output
+      run: |
+        # Check if RPMs were created
+        if [ ! -d "XRT/build/versal/rpms" ] || [ -z "$(ls -A XRT/build/versal/rpms/*.rpm 2>/dev/null)" ]; then
+          echo "Error: No RPM files generated!"
+          exit 1
+        fi
+        
+    - name: Upload RPM Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: xrt-edge-versal-rpms
+        path: XRT/build/versal/rpms/*.rpm
+        retention-days: 1
+        if-no-files-found: error
+        
+    - name: Generate Build Summary
+      run: |
+        echo "## XRT Edge Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- Platform: Versal" >> $GITHUB_STEP_SUMMARY
+        echo "- Architecture: aarch64" >> $GITHUB_STEP_SUMMARY
+        echo "- XDP Commit: ${{ github.event.pull_request.head.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Generated RPMs:" >> $GITHUB_STEP_SUMMARY
+        ls -lh XRT/build/versal/rpms/*.rpm | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+        
+    - name: Upload Build Logs on Failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          XRT/build/**/*.log
+          XRT/build/**/CMakeFiles/CMakeOutput.log
+          XRT/build/**/CMakeFiles/CMakeError.log
+        if-no-files-found: ignore
+        
+    - name: Post Build Status to PR
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}';
+          const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          
+          let message = '';
+          if (status === 'success') {
+            message = `✅ **XRT Edge build (Versal) succeeded!**\n\n`;
+            message += `Build artifacts are available in the [workflow run](${runUrl}).\n\n`;
+            message += `To download: Click the link above → Summary → Artifacts → xrt-edge-versal-rpms`;
+          } else {
+            message = `❌ **XRT Edge build (Versal) failed!**\n\n`;
+            message += `Check the [workflow logs](${runUrl}) for details.`;
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          });
+
+  # Future job for client builds
+  build-xrt-client:
+    if: contains(github.event.pull_request.labels.*.name, 'build-client')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder for client build
+        run: echo "Client build would go here"
+
+  # Future job for ve2 builds  
+  build-xrt-ve2:
+    if: contains(github.event.pull_request.labels.*.name, 'build-ve2')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder for ve2 build
+        run: echo "VE2 build would go here"

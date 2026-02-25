@@ -34,10 +34,30 @@ jobs:
         
     - name: Apply XDP PR Changes to XRT
       run: |
-        XDP_PATH="XRT/src/runtime_src/xdp"
-        echo "Applying XDP changes to: $XDP_PATH"
-        rm -rf $XDP_PATH/*
-        cp -r xdp-pr $XDP_PATH/
+        # Remove the old XDP
+        rm -rf XRT/src/runtime_src/xdp
+        # Copy your XDP
+        cp -r xdp-pr XRT/src/runtime_src/xdp
+    
+    - name: Verify XDP Replacement
+      run: |
+        echo "=== Verifying XDP replacement ==="
+        # Check if directory exists
+        if [ -d "XRT/src/runtime_src/xdp" ]; then
+          echo "✓ XDP directory exists"
+          ls -la XRT/src/runtime_src/xdp/
+        else
+          echo "✗ XDP directory missing"
+          exit 1
+        fi
+        
+        # Check for CMakeLists.txt
+        if [ -f "XRT/src/runtime_src/xdp/CMakeLists.txt" ]; then
+          echo "✓ Found XDP CMakeLists.txt"
+        else
+          echo "✗ XDP CMakeLists.txt missing"
+          exit 1
+        fi
         
     - name: Setup Build Environment Using XRT Scripts
       run: |

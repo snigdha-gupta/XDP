@@ -187,16 +187,27 @@ AIETraceConfigV3Filetype::getTiles(const std::string& graph_name,
         }
     }
 
+    // Helper: tile has at least one DMA channel (used to select only DMA tiles for memory metric set)
+    auto hasDmaChannels = [](const tile_type& t) {
+        for (const auto& s : t.s2mm_names)
+            if (!s.empty() && s != "unused") return true;
+        for (const auto& s : t.mm2s_names)
+            if (!s.empty() && s != "unused") return true;
+        return false;
+    };
+
     std::vector<tile_type> tiles;
     for (const auto& pair : tileMap) {
         const tile_type& tile = pair.second;
 
-        if (((type == module_type::core) && tile.active_core) ||
-            ((type == module_type::dma) && tile.active_memory)) {
+        if ((type == module_type::core) && tile.active_core) {
+            tiles.push_back(tile);
+        } else if ((type == module_type::dma) && tile.active_memory && hasDmaChannels(tile)) {
+            // Only include tiles that actually have DMA channels for memory module metrics
             tiles.push_back(tile);
         }
     }
-    
+
     return tiles;
 }
 

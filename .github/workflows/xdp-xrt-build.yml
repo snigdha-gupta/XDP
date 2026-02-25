@@ -1,4 +1,4 @@
-name: XDP PR Build Test
+name: XDP Build Test
 
 on:
   # For testing - trigger on push to specific branch
@@ -10,14 +10,14 @@ on:
     branches: [ master ]
 
 jobs:
-  build-xrt-edge:
+  build-xrt-alveo:
   # For testing, always run on push. 
-  # Only run if the PR has 'build-edge' label
+  # Only run if the PR has 'build-alveo' label
     if: |
       github.event_name == 'push' || 
-      contains(github.event.pull_request.labels.*.name, 'build-edge') 
+      contains(github.event.pull_request.labels.*.name, 'build-alveo') 
     runs-on: ubuntu-latest # or ubuntu-20.04 or something else?
-    timeout-minutes: 90
+    timeout-minutes: 60
     
     steps:
     - name: Checkout XDP PR
@@ -34,37 +34,16 @@ jobs:
         
     - name: Apply XDP PR Changes to XRT
       run: |
-        # XDP is at XRT/src/runtime_src/xdp
         XDP_PATH="XRT/src/runtime_src/xdp"
-        
         echo "Applying XDP changes to: $XDP_PATH"
-        
-        # Remove existing XDP content
         rm -rf $XDP_PATH/*
-        
-        # Copy PR changes to XDP location
         cp -r xdp-pr/* $XDP_PATH/
-        
-        ## Show what changed
-        #cd $XDP_PATH
-        #ls -la
-
-    - name: Check PetaLinux Access
-      run: |
-        echo "Checking PetaLinux installation..."
-        ls -la /proj/petalinux/ || echo "PetaLinux not found at /proj/petalinux"
         
     - name: Setup Build Environment Using XRT Scripts
       run: |
-        # Navigate to XRT scripts directory
         cd XRT/src/runtime_src/tools/scripts
-        
-        # Make the dependency script executable
         chmod +x xrtdeps.sh
-        
-        # Install XRT dependencies
         sudo ./xrtdeps.sh
-        
         # Install cross-compilation tools for edge builds
         sudo apt-get update
         sudo apt-get install -y \
@@ -75,76 +54,33 @@ jobs:
     - name: Build XRT for Alveo
       run: |
         cd XRT/build
-        
-        # Make build script executable
         chmod +x build.sh
-        
-        # Build for alveo
         ./build.sh -noinit -noert
         
-    # - name: Validate Build Output
-    #   run: |
-    #     # Check if RPMs were created
-    #     if [ ! -d "XRT/build/versal/rpms" ] || [ -z "$(ls -A XRT/build/versal/rpms/*.rpm 2>/dev/null)" ]; then
-    #       echo "Error: No RPM files generated!"
-    #       exit 1
-    #     fi
-        
-    # - name: Upload RPM Artifacts
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: xrt-edge-versal-rpms
-    #     path: XRT/build/versal/rpms/*.rpm
-    #     retention-days: 1
-    #     if-no-files-found: error
-        
-    - name: Generate Build Summary
+    - name: Validate build
       run: |
-        echo "## XRT Build Summary" >> $GITHUB_STEP_SUMMARY
-        # echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
-        # echo "- Platform: Versal" >> $GITHUB_STEP_SUMMARY
-        # echo "- Architecture: aarch64" >> $GITHUB_STEP_SUMMARY
-        # echo "- XDP Commit: ${{ github.event.pull_request.head.sha }}" >> $GITHUB_STEP_SUMMARY
-        # echo "" >> $GITHUB_STEP_SUMMARY
-        # echo "### Generated RPMs:" >> $GITHUB_STEP_SUMMARY
-        # ls -lh XRT/build/versal/rpms/*.rpm | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so" ]; then
+          echo "✓ Build successful"
+        else
+          echo "✗ Build failed"
+          exit 1
+        fi
         
-    - name: Upload Build Logs on Failure
-      if: failure()
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: |
-          XRT/build/**/*.log
-          XRT/build/**/CMakeFiles/CMakeOutput.log
-          XRT/build/**/CMakeFiles/CMakeError.log
-        if-no-files-found: ignore
+        name: xrt-alveo-build-${{ github.run_number }}
+        path: XRT/build/Release/opt/xilinx/xrt/lib/*.so
+        retention-days: 1
         
-    - name: Post Build Status to PR
-      if: always()
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const status = '${{ job.status }}';
-          const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-          
-          let message = '';
-          if (status === 'success') {
-            message = `✅ **XRT buildsucceeded!**\n\n`;
-            message += `Build artifacts are available in the [workflow run](${runUrl}).\n\n`;
-            message += `To download: Click the link above → Summary → Artifacts → xrt-edge-versal-rpms`;
-          } else {
-            message = `❌ **XRT build failed!**\n\n`;
-            message += `Check the [workflow logs](${runUrl}) for details.`;
-          }
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: message
-          });
-
+  # Future job for edge builds
+  build-xrt-edge:
+    if: contains(github.event.pull_request.labels.*.name, 'build-edge')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder for edge build
+        run: echo "Edge build would go here"
+        
   # Future job for client builds
   build-xrt-client:
     if: contains(github.event.pull_request.labels.*.name, 'build-client')

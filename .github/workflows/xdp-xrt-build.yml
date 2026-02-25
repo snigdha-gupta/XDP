@@ -17,15 +17,6 @@ jobs:
       github.event_name == 'push' || 
       contains(github.event.pull_request.labels.*.name, 'build-edge') 
     runs-on: ubuntu-latest # or ubuntu-20.04 or something else?
-    container:
-      image: xcoacasharbor.amd.com/aie-ipu-build-docker-local/flexml-rt-lnx:u24.11262025
-      volumes:
-        - /proj:/proj
-        - /build:/build
-        - /group:/group
-        - /tool:/tool
-        - /tools:/tools
-        - /wrk:/wrk
     timeout-minutes: 90
     
     steps:
@@ -81,43 +72,42 @@ jobs:
           g++-aarch64-linux-gnu \
           crossbuild-essential-arm64
         
-    - name: Build XRT for Edge (Versal)
+    - name: Build XRT for Alveo
       run: |
         cd XRT/build
         
         # Make build script executable
         chmod +x build.sh
         
-        # Build for versal
+        # Build for alveo
         ./build.sh -noinit
-        #./build_edge.sh -aarch versal
         
-    - name: Validate Build Output
-      run: |
-        # Check if RPMs were created
-        if [ ! -d "XRT/build/versal/rpms" ] || [ -z "$(ls -A XRT/build/versal/rpms/*.rpm 2>/dev/null)" ]; then
-          echo "Error: No RPM files generated!"
-          exit 1
-        fi
+    # - name: Validate Build Output
+    #   run: |
+    #     # Check if RPMs were created
+    #     if [ ! -d "XRT/build/versal/rpms" ] || [ -z "$(ls -A XRT/build/versal/rpms/*.rpm 2>/dev/null)" ]; then
+    #       echo "Error: No RPM files generated!"
+    #       exit 1
+    #     fi
         
-    - name: Upload RPM Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: xrt-edge-versal-rpms
-        path: XRT/build/versal/rpms/*.rpm
-        retention-days: 1
-        if-no-files-found: error
+    # - name: Upload RPM Artifacts
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: xrt-edge-versal-rpms
+    #     path: XRT/build/versal/rpms/*.rpm
+    #     retention-days: 1
+    #     if-no-files-found: error
         
     - name: Generate Build Summary
       run: |
-        echo "## XRT Edge Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
-        echo "- Platform: Versal" >> $GITHUB_STEP_SUMMARY
-        echo "- Architecture: aarch64" >> $GITHUB_STEP_SUMMARY
-        echo "- XDP Commit: ${{ github.event.pull_request.head.sha }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Generated RPMs:" >> $GITHUB_STEP_SUMMARY
-        ls -lh XRT/build/versal/rpms/*.rpm | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+        echo "## XRT Build Summary" >> $GITHUB_STEP_SUMMARY
+        # echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
+        # echo "- Platform: Versal" >> $GITHUB_STEP_SUMMARY
+        # echo "- Architecture: aarch64" >> $GITHUB_STEP_SUMMARY
+        # echo "- XDP Commit: ${{ github.event.pull_request.head.sha }}" >> $GITHUB_STEP_SUMMARY
+        # echo "" >> $GITHUB_STEP_SUMMARY
+        # echo "### Generated RPMs:" >> $GITHUB_STEP_SUMMARY
+        # ls -lh XRT/build/versal/rpms/*.rpm | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
         
     - name: Upload Build Logs on Failure
       if: failure()
@@ -140,11 +130,11 @@ jobs:
           
           let message = '';
           if (status === 'success') {
-            message = `✅ **XRT Edge build (Versal) succeeded!**\n\n`;
+            message = `✅ **XRT buildsucceeded!**\n\n`;
             message += `Build artifacts are available in the [workflow run](${runUrl}).\n\n`;
             message += `To download: Click the link above → Summary → Artifacts → xrt-edge-versal-rpms`;
           } else {
-            message = `❌ **XRT Edge build (Versal) failed!**\n\n`;
+            message = `❌ **XRT build failed!**\n\n`;
             message += `Check the [workflow logs](${runUrl}) for details.`;
           }
           

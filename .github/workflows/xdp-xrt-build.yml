@@ -37,7 +37,7 @@ jobs:
         XDP_PATH="XRT/src/runtime_src/xdp"
         echo "Applying XDP changes to: $XDP_PATH"
         rm -rf $XDP_PATH/*
-        cp -r xdp-pr/* $XDP_PATH/
+        cp -r xdp-pr $XDP_PATH/
         
     - name: Setup Build Environment Using XRT Scripts
       run: |
@@ -70,7 +70,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: xrt-alveo-build-${{ github.run_number }}
-        path: XRT/build/Release/opt/xilinx/xrt/lib/*.so
+        path: |
+          XRT/build/Release/opt/xilinx/xrt/lib/*.so
+          XRT/build/Release/opt/xilinx/xrt/lib/module/xrt/*.so
         retention-days: 1
         
   # Future job for edge builds

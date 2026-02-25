@@ -15,7 +15,7 @@ file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/writer/aie_status/*.cpp"
 )
 
-// TODO: for aie_status, we don't support xdna so do we use xaiengine or aie_codegen
+# TODO: for aie_status, we don't support xdna so do we use xaiengine or aie_codegen
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_status_plugin SHARED ${AIE_STATUS_PLUGIN_FILES})
   add_dependencies(xdp_aie_status_plugin xdp_core)

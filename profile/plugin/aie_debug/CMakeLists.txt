@@ -32,14 +32,20 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
   "${PROFILE_DIR}/device/common/*.cpp"
 )
 
-// TODO: for aie_debug, we don't support xdna so do we use xaiengine or aie_codegen
+# VE2: when XDP_USE_AIE_CODEGEN use aie_codegen (for xdp_aie_driver.h); else xaiengine
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-  target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX="on" XDP_VE2_BUILD=1)
+  if (XDP_USE_AIE_CODEGEN)
+    target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
+    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_VE2_BUILD=1 XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
+  else()
+    target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
+    target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_VE2_BUILD=1)
+  endif()
+  target_compile_definitions(xdp_aie_debug_plugin PRIVATE FAL_LINUX=on)
   target_include_directories(xdp_aie_debug_plugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
-  
+
   install (TARGETS xdp_aie_debug_plugin
     RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
     LIBRARY DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT} ${XRT_NAMELINK_SKIP}
@@ -73,6 +79,7 @@ elseif (DEFINED XRT_AIE_BUILD AND XRT_EDGE)
 
 endif()
 
-if (TARGET xdp_aie_debug_plugin AND XDP_USE_AIE_CODEGEN)
+# Client build: add XDP_USE_AIE_CODEGEN (VE2 sets it in its block when needed)
+if (TARGET xdp_aie_debug_plugin AND XDP_USE_AIE_CODEGEN AND XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
 endif()

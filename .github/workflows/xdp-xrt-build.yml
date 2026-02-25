@@ -80,7 +80,7 @@ jobs:
         chmod +x build.sh
         
         # Build for alveo
-        ./build.sh -noinit
+        ./build.sh -noinit -noert
         
     # - name: Validate Build Output
     #   run: |

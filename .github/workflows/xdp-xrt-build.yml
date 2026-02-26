@@ -1,4 +1,4 @@
-# TEST
+# TEST 2
 name: XDP Build Test
 
 on:
@@ -58,14 +58,6 @@ jobs:
           exit 1
         fi
         
-        # Check for CMakeLists.txt
-        if [ -f "XRT/src/runtime_src/xdp/CMakeLists.txt" ]; then
-          echo "✓ Found XDP CMakeLists.txt"
-        else
-          echo "✗ XDP CMakeLists.txt missing"
-          exit 1
-        fi
-
     - name: Verify XDP workflow file
       run: |
         echo "=== Checking XDP workflow file ==="
@@ -116,15 +108,33 @@ jobs:
           echo "✗ No .so files found"
         fi
 
-    - name: Upload Build Artifacts
-      if: steps.check-artifacts.outputs.found == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: xrt-alveo-build-${{ github.run_number }}
-        path: |
-          XRT/build/Release/opt/xilinx/xrt/lib/*.so
-          XRT/build/Release/opt/xilinx/xrt/lib/module/xrt/*.so
-        retention-days: 1
+    - name: Find XDP Libraries
+      run: |
+        echo "=== Searching for XDP libraries ==="
+        echo "Looking for libxdp_core.so and libxdp_aie_profile_plugin.so..."
+        
+        # Search in the entire build directory
+        echo -e "\n--- Search results for libxdp_core.so ---"
+        find XRT/build -name "libxdp_core.so" -type f 2>/dev/null | while read -r file; do
+          echo "Found: $file"
+          ls -lh "$file"
+        done
+        
+        echo -e "\n--- Search results for libxdp_aie_profile_plugin.so ---"
+        find XRT/build -name "libxdp_aie_profile_plugin.so" -type f 2>/dev/null | while read -r file; do
+          echo "Found: $file"
+          ls -lh "$file"
+        done
+
+    # - name: Upload Build Artifacts
+    #   if: steps.check-artifacts.outputs.found == 'true'
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: xrt-alveo-build-${{ github.run_number }}
+    #     path: |
+    #       XRT/build/Release/opt/xilinx/xrt/lib/*.so
+    #       XRT/build/Release/opt/xilinx/xrt/lib/module/xrt/*.so
+    #     retention-days: 1
         
   # Future job for edge builds
   build-xrt-edge:

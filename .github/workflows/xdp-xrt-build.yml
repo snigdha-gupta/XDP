@@ -1,3 +1,4 @@
+# TEST
 name: XDP Build Test
 
 on:
@@ -25,6 +26,11 @@ jobs:
       with:
         path: xdp-pr
         fetch-depth: 0
+
+    - name: Display XDP workflow info
+      run: |
+        echo "First line of XDP workflow file:"
+        head -n 1 xdp-pr/.github/workflows/xdp-xrt-build.yml || echo "File not found"
         
     - name: Clone XRT Repository
       run: |
@@ -38,6 +44,7 @@ jobs:
         rm -rf XRT/src/runtime_src/xdp
         # Copy your XDP
         cp -r xdp-pr XRT/src/runtime_src/xdp
+        ls -la XRT/src/runtime_src/xdp
     
     - name: Verify XDP Replacement
       run: |
@@ -57,6 +64,16 @@ jobs:
         else
           echo "✗ XDP CMakeLists.txt missing"
           exit 1
+        fi
+
+    - name: Verify XDP workflow file
+      run: |
+        echo "=== Checking XDP workflow file ==="
+        if [ -f "XRT/src/runtime_src/xdp/.github/workflows/xdp-xrt-build.yml" ]; then
+          echo "First line of copied XDP workflow:"
+          head -n 1 XRT/src/runtime_src/xdp/.github/workflows/xdp-xrt-build.yml
+        else
+          echo "Note: .github/workflows/xdp-xrt-build.yml not found in copied XDP"
         fi
         
     - name: Setup Build Environment Using XRT Scripts
@@ -86,7 +103,21 @@ jobs:
           exit 1
         fi
         
+    - name: Check artifacts exist
+      id: check-artifacts
+      run: |
+        echo "Checking for build artifacts..."
+        if ls XRT/build/Release/opt/xilinx/xrt/lib/*.so 1> /dev/null 2>&1; then
+          echo "found=true" >> $GITHUB_OUTPUT
+          echo "✓ Found .so files to upload"
+          ls -la XRT/build/Release/opt/xilinx/xrt/lib/*.so | head -10
+        else
+          echo "found=false" >> $GITHUB_OUTPUT
+          echo "✗ No .so files found"
+        fi
+
     - name: Upload Build Artifacts
+      if: steps.check-artifacts.outputs.found == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: xrt-alveo-build-${{ github.run_number }}

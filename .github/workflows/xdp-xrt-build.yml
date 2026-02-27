@@ -1,21 +1,13 @@
 name: XDP Build Test
 
 on:
-  # For testing - trigger on push to specific branch
-  push:
-    branches: [ test-ci ]  # test branch
-  # PR trigger for production use
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches: [ master ]
 
 jobs:
   build-xrt-alveo:
-  # For testing, always run on push. 
-  # Only run if the PR has 'build-alveo' label
-    if: |
-      github.event_name == 'push' || 
-      contains(github.event.pull_request.labels.*.name, 'build-alveo') 
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     
@@ -78,7 +70,8 @@ jobs:
         #name: xrt-alveo-build-PR-${{ github.event.pull_request.number }}
         name: xrt-alveo-build-${{ github.run_number }}
         path: |
-          XRT/build/Release/opt/xilinx/xrt/lib/*.so*
+          XRT/build/Release/opt/xilinx/xrt/lib/libxrt*.so*
+          XRT/build/Release/opt/xilinx/xrt/lib/libxdp*.so*
           XRT/build/Release/opt/xilinx/xrt/lib/xrt/module/*.so*
         retention-days: 1
         if-no-files-found: warn

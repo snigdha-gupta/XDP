@@ -1,4 +1,3 @@
-# TEST 5
 name: XDP Build Test
 
 on:
@@ -26,11 +25,6 @@ jobs:
       with:
         path: xdp-pr
         fetch-depth: 0
-
-    - name: Display XDP workflow info
-      run: |
-        echo "First line of XDP workflow file:"
-        head -n 1 xdp-pr/.github/workflows/xdp-xrt-build.yml || echo "File not found"
         
     - name: Clone XRT Repository
       run: |
@@ -40,12 +34,8 @@ jobs:
         
     - name: Apply XDP PR Changes to XRT
       run: |
-        # Remove the old XDP
         rm -rf XRT/src/runtime_src/xdp
-        # Copy your XDP
         cp -r xdp-pr XRT/src/runtime_src/xdp
-        ls -la XRT/src/runtime_src/xdp
-        head -n 1 XRT/src/runtime_src/xdp/.github/workflows/xdp-xrt-build.yml || echo "File not found"
         
     - name: Setup Build Environment Using XRT Scripts
       run: |
@@ -67,67 +57,29 @@ jobs:
         
     - name: Validate build
       run: |
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so" ]; then
-          echo "✓ Build successful - found libxrt_core.so"
+        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so*" ]; then
+          echo "✓ XRT Build successful"
         else
-          echo "✗ Build failed - libxrt_core.so not found"
+          echo "✗ XRT Build failed"
           exit 1
         fi
 
-    - name: Comprehensive Artifact Search
-      run: |        
-        echo -e "\n=== Total .so files in build directory: "
-        find XRT/build -type f -name "*.so*" | wc -l
-        
-        echo -e "\n=== All libraries with 'xdp' in name ==="
-        find XRT/build -type f -name "*xdp*.so*"
-
-        echo -e "\n=== All files at XRT/build/Release/opt/xilinx/xrt/lib/xrt/module ==="
-        if [ -d "XRT/build/Release/opt/xilinx/xrt/lib/xrt/module" ]; then
-          echo "Found module directory! Contents:"
-          ls -la XRT/build/Release/opt/xilinx/xrt/lib/xrt/module/
+        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so*" ]; then
+          echo "✓ XDP Build successful"
         else
-          echo "Module directory not found"
-          fi
-
-        echo "Total .so files in XRT/build/Release/ directory:"
-        find XRT/build/Release/ -name "*.so.*"
-        
-        # Search for specific XDP libraries anywhere
-        echo -e "\n=== Specific search for libxdp_core.so ==="
-        find XRT/build -name "*libxdp*.so*" -type f 2>/dev/null || echo "  Not found"
-        
-    - name: Create Artifact Directory
-      id: prep-artifacts
-      run: |
-        echo "=== Preparing artifacts for upload ==="
-        mkdir -p artifacts-to-upload
-        
-        # Copy all .so files from standard location
-        if [ -d "XRT/build/Release/opt/xilinx/xrt/lib" ]; then
-          echo "Copying from Release/opt/xilinx/xrt/lib:"
-          find XRT/build/Release/opt/xilinx/xrt/lib -name "*.so" -type f -exec cp {} artifacts-to-upload/ \; 2>/dev/null
+          echo "✗ XDP Build failed"
+          exit 1
         fi
         
-        # Also search and copy any xdp libraries found anywhere
-        echo "Searching for XDP libraries anywhere in build:"
-        find XRT/build -name "*xdp*.so" -type f -exec cp {} artifacts-to-upload/ \; 2>/dev/null || true
-        
-        # List what we're uploading
-        echo -e "\n=== Files prepared for upload ==="
-        ls -la artifacts-to-upload/ | head -20
-        
-        # Count files
-        FILE_COUNT=$(find artifacts-to-upload -name "*.so" -type f | wc -l)
-        echo "Total files to upload: $FILE_COUNT"
-        echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
-
     - name: Upload Build Artifacts
-      if: steps.prep-artifacts.outputs.file_count != '0'
       uses: actions/upload-artifact@v4
       with:
+        # For PRs, name the artifacts as xrt-alveo-build-PR-##
+        #name: xrt-alveo-build-PR-${{ github.event.pull_request.number }}
         name: xrt-alveo-build-${{ github.run_number }}
-        path: artifacts-to-upload/*.so
+        path: |
+          XRT/build/Release/opt/xilinx/xrt/lib/*.so*
+          XRT/build/Release/opt/xilinx/xrt/lib/xrt/module/*.so*
         retention-days: 1
         if-no-files-found: warn
 
@@ -137,23 +89,19 @@ jobs:
         echo "## XDP Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "- Build Date: $(date)" >> $GITHUB_STEP_SUMMARY
         echo "- XDP Source: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so" ]; then
-          echo "- XRT Core Build: ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so*" ]; then
+          echo "- XRT Build: ✅ Success" >> $GITHUB_STEP_SUMMARY
         else
-          echo "- XRT Core Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          echo "- XRT Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### XDP Libraries Found:" >> $GITHUB_STEP_SUMMARY
-        if find XRT/build -name "*xdp*.so" -type f | grep -q .; then
-          find XRT/build -name "*xdp*.so" -type f | while read -r lib; do
-            echo "- $(basename $lib): $lib" >> $GITHUB_STEP_SUMMARY
-          done
+
+        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so*" ]; then
+          echo "- XDP Build: ✅ Success" >> $GITHUB_STEP_SUMMARY
         else
-          echo "- ⚠️ No XDP libraries found in build" >> $GITHUB_STEP_SUMMARY
+          echo "- XDP Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
-        
+            
   # Future job for edge builds
   build-xrt-edge:
     if: contains(github.event.pull_request.labels.*.name, 'build-edge')

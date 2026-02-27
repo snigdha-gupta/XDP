@@ -57,14 +57,14 @@ jobs:
         
     - name: Validate build
       run: |
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so*" ]; then
+        if ls XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so* 1> /dev/null 2>&1; then
           echo "✓ XRT Build successful"
         else
           echo "✗ XRT Build failed"
           exit 1
         fi
-
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so*" ]; then
+        
+        if ls XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so* 1> /dev/null 2>&1; then
           echo "✓ XDP Build successful"
         else
           echo "✗ XDP Build failed"
@@ -90,13 +90,13 @@ jobs:
         echo "- Build Date: $(date)" >> $GITHUB_STEP_SUMMARY
         echo "- XDP Source: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
 
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so*" ]; then
+        if ls XRT/build/Release/opt/xilinx/xrt/lib/libxrt_core.so* 1> /dev/null 2>&1; then
           echo "- XRT Build: ✅ Success" >> $GITHUB_STEP_SUMMARY
         else
           echo "- XRT Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
 
-        if [ -f "XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so*" ]; then
+        if ls XRT/build/Release/opt/xilinx/xrt/lib/libxdp_core.so* 1> /dev/null 2>&1; then
           echo "- XDP Build: ✅ Success" >> $GITHUB_STEP_SUMMARY
         else
           echo "- XDP Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY

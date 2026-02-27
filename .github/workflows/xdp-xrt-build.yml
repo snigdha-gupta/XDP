@@ -1,4 +1,4 @@
-# TEST 3
+# TEST 4
 name: XDP Build Test
 
 on:
@@ -95,27 +95,27 @@ jobs:
           exit 1
         fi
 
-        - name: Debug XDP Build Configuration
-          run: |
-            echo "=== Checking if XDP is enabled in build ==="
-            
-            # Check XDP CMakeLists.txt
-            echo "XDP CMakeLists.txt content (first 20 lines):"
-            head -20 XRT/src/runtime_src/xdp/CMakeLists.txt || echo "CMakeLists.txt not found"
-            
-            # Check for add_library commands
-            echo -e "\n=== XDP library definitions in CMakeLists ==="
-            grep -r "add_library.*xdp" XRT/src/runtime_src/xdp/ || echo "No add_library commands found for xdp"
-            
-            # Check build flags
-            echo -e "\n=== Build configuration ==="
-            if [ -f "XRT/build/CMakeCache.txt" ]; then
-              grep -E "(CMAKE_BUILD_TYPE|XDP|PROFILE)" XRT/build/CMakeCache.txt || true
-            fi
-            
-            # List all CMakeLists.txt files in xdp
-            echo -e "\n=== All CMakeLists.txt files in XDP ==="
-            find XRT/src/runtime_src/xdp -name "CMakeLists.txt" -type f
+    - name: Debug XDP Build Configuration
+      run: |
+        echo "=== Checking if XDP is enabled in build ==="
+        
+        # Check XDP CMakeLists.txt
+        echo "XDP CMakeLists.txt content (first 20 lines):"
+        head -20 XRT/src/runtime_src/xdp/CMakeLists.txt || echo "CMakeLists.txt not found"
+        
+        # Check for add_library commands
+        echo -e "\n=== XDP library definitions in CMakeLists ==="
+        grep -r "add_library.*xdp" XRT/src/runtime_src/xdp/ || echo "No add_library commands found for xdp"
+        
+        # Check build flags
+        echo -e "\n=== Build configuration ==="
+        if [ -f "XRT/build/CMakeCache.txt" ]; then
+          grep -E "(CMAKE_BUILD_TYPE|XDP|PROFILE)" XRT/build/CMakeCache.txt || true
+        fi
+        
+        # List all CMakeLists.txt files in xdp
+        echo -e "\n=== All CMakeLists.txt files in XDP ==="
+        find XRT/src/runtime_src/xdp -name "CMakeLists.txt" -type f
         
     - name: Comprehensive Artifact Search
       run: |

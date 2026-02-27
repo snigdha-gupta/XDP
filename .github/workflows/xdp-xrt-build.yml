@@ -66,9 +66,7 @@ jobs:
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        # For PRs, name the artifacts as xrt-alveo-build-PR-##
-        #name: xrt-alveo-build-PR-${{ github.event.pull_request.number }}
-        name: xrt-alveo-build-${{ github.run_number }}
+        name: xrt-alveo-build-PR-${{ github.event.pull_request.number }}
         path: |
           XRT/build/Release/opt/xilinx/xrt/lib/libxrt*.so*
           XRT/build/Release/opt/xilinx/xrt/lib/libxdp*.so*

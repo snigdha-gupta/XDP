@@ -1,4 +1,4 @@
-# TEST 4
+# TEST 5
 name: XDP Build Test
 
 on:
@@ -45,28 +45,7 @@ jobs:
         # Copy your XDP
         cp -r xdp-pr XRT/src/runtime_src/xdp
         ls -la XRT/src/runtime_src/xdp
-    
-    - name: Verify XDP Replacement
-      run: |
-        echo "=== Verifying XDP replacement ==="
-        # Check if directory exists
-        if [ -d "XRT/src/runtime_src/xdp" ]; then
-          echo "✓ XDP directory exists"
-          ls -la XRT/src/runtime_src/xdp/
-        else
-          echo "✗ XDP directory missing"
-          exit 1
-        fi
-        
-        # Check for CMakeLists.txt
-        if [ -f "XRT/src/runtime_src/xdp/CMakeLists.txt" ]; then
-          echo "✓ Found XDP CMakeLists.txt"
-          # Show XDP subdirectories that might contain libraries
-          echo "XDP subdirectories:"
-          find XRT/src/runtime_src/xdp -type d -name "CMakeLists.txt" -exec dirname {} \; | sort
-        else
-          echo "✗ XDP CMakeLists.txt missing"
-        fi
+        head -n 1 XRT/src/runtime_src/xdp/.github/workflows/xdp-xrt-build.yml || echo "File not found"
         
     - name: Setup Build Environment Using XRT Scripts
       run: |
@@ -95,81 +74,29 @@ jobs:
           exit 1
         fi
 
-    - name: Debug XDP Build Configuration
-      run: |
-        echo "=== Checking if XDP is enabled in build ==="
-        
-        # Check XDP CMakeLists.txt
-        echo "XDP CMakeLists.txt content (first 20 lines):"
-        head -20 XRT/src/runtime_src/xdp/CMakeLists.txt || echo "CMakeLists.txt not found"
-        
-        # Check for add_library commands
-        echo -e "\n=== XDP library definitions in CMakeLists ==="
-        grep -r "add_library.*xdp" XRT/src/runtime_src/xdp/ || echo "No add_library commands found for xdp"
-        
-        # Check build flags
-        echo -e "\n=== Build configuration ==="
-        if [ -f "XRT/build/CMakeCache.txt" ]; then
-          grep -E "(CMAKE_BUILD_TYPE|XDP|PROFILE)" XRT/build/CMakeCache.txt || true
-        fi
-        
-        # List all CMakeLists.txt files in xdp
-        echo -e "\n=== All CMakeLists.txt files in XDP ==="
-        find XRT/src/runtime_src/xdp -name "CMakeLists.txt" -type f
-        
     - name: Comprehensive Artifact Search
-      run: |
-        echo "=== Comprehensive search for all built libraries ==="
+      run: |        
+        echo -e "\n=== Total .so files in build directory: "
+        find XRT/build -type f -name "*.so*" | wc -l
         
-        # Count total .so files
-        echo "Total .so files in build directory:"
-        find XRT/build -name "*.so" -type f | wc -l
-        
-        # Find all XDP-related libraries
         echo -e "\n=== All libraries with 'xdp' in name ==="
-        find XRT/build -name "*xdp*.so" -type f | sort
-        
-        # Check specific build subdirectories
-        echo -e "\n=== Libraries in key directories ==="
-        for dir in \
-          "XRT/build/Release/opt/xilinx/xrt/lib" \
-          "XRT/build/Release/lib" \
-          "XRT/build/lib" \
-          "XRT/build/src/runtime_src/xdp" \
-          "XRT/build/Release/src/runtime_src/xdp"; do
-          if [ -d "$dir" ]; then
-            echo -e "\nChecking $dir:"
-            find "$dir" -name "*.so" -type f | head -10
-          else
-            echo -e "\nDirectory not found: $dir"
+        find XRT/build -type f -name "*xdp*.so*"
+
+        echo -e "\n=== All files at XRT/build/Release/opt/xilinx/xrt/lib/xrt/module ==="
+        if [ -d "XRT/build/Release/opt/xilinx/xrt/lib/xrt/module" ]; then
+          echo "Found module directory! Contents:"
+          ls -la XRT/build/Release/opt/xilinx/xrt/lib/xrt/module/
+        else
+          echo "Module directory not found"
           fi
-        done
-        
-        # Look for build artifacts in CMakeFiles
-        echo -e "\n=== Checking CMake build outputs ==="
-        find XRT/build -path "*/CMakeFiles/*" -name "*.so" | grep -i xdp | head -10 || echo "No XDP libraries in CMakeFiles"
+
+        echo "Total .so files in XRT/build/Release/ directory:"
+        find XRT/build/Release/ -name "*.so.*"
         
         # Search for specific XDP libraries anywhere
-        echo -e "\n=== Specific XDP library search ==="
-        for lib in "libxdp_core.so" "libxdp_aie_profile_plugin.so" "libxdp_hal_plugin.so" "libxdp_device_offload_plugin.so"; do
-          echo -e "\nSearching for $lib:"
-          find XRT/build -name "$lib" -type f 2>/dev/null || echo "  Not found"
-        done
-
-    - name: Check Build Logs for XDP
-      run: |
-        echo "=== Checking if XDP was actually built ==="
+        echo -e "\n=== Specific search for libxdp_core.so ==="
+        find XRT/build -name "*libxdp*.so*" -type f 2>/dev/null || echo "  Not found"
         
-        # Look for XDP in CMake output
-        if [ -f "XRT/build/CMakeCache.txt" ]; then
-          echo "XDP-related CMake cache entries:"
-          grep -i xdp XRT/build/CMakeCache.txt | head -10 || echo "No XDP entries in CMakeCache"
-        fi
-        
-        # Check if XDP targets were configured
-        echo -e "\n=== XDP build targets ==="
-        find XRT/build -name "build.make" -exec grep -l "xdp" {} \; | head -10 || echo "No XDP references in build.make files"
-
     - name: Create Artifact Directory
       id: prep-artifacts
       run: |
@@ -190,7 +117,7 @@ jobs:
         echo -e "\n=== Files prepared for upload ==="
         ls -la artifacts-to-upload/ | head -20
         
-                # Count files
+        # Count files
         FILE_COUNT=$(find artifacts-to-upload -name "*.so" -type f | wc -l)
         echo "Total files to upload: $FILE_COUNT"
         echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT

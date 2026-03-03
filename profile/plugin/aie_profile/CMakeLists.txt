@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.  All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc.  All rights reserved.
 #
 
 # ====================================================================
 # This builds the AIE Profile plugin.  It is currently built
 # on Edge, x86, Client, and VE2 platforms that support AIE.
 # ====================================================================
-# Client flow: aie_codegen; Edge flow: xaiengine. VE2 handled in its block below.
+# Client flow: aie_codegen; Edge flow: xaiengine. VE2: _xdna uses aie_codegen, _zocl uses xaiengine.
 
 file(GLOB AIE_PROFILE_PLUGIN_FILES
   "${PROFILE_DIR}/plugin/aie_profile/*.h"
@@ -28,6 +28,10 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
   "${PROFILE_DIR}/device/common/*.h"
   "${PROFILE_DIR}/device/common/*.cpp"
 )
+file(GLOB AIE_JSON_PARSER_FILES
+  "${PROFILE_DIR}/database/parser/*.h"
+  "${PROFILE_DIR}/database/parser/*.cpp"
+)
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_profile/client")
@@ -38,9 +42,12 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   )
   xrt_configure_version_file(xdp_aie_profile_plugin SHARED)
   add_library(xdp_aie_profile_plugin SHARED xdp_aie_profile_plugin-version.rc
-    ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES} ${AIE_PROFILE_UTIL_FILES})
+    ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_JSON_PARSER_FILES})
   add_dependencies(xdp_aie_profile_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_profile_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
+  if (DEFINED AIE_CODEGEN_DIR)
+    target_include_directories(xdp_aie_profile_plugin PRIVATE ${AIE_CODEGEN_DIR}/include)
+  endif()
   target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   set_target_properties(xdp_aie_profile_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
@@ -79,17 +86,19 @@ else()
       "${IMPL_DIR}/*.h"
       "${IMPL_DIR}/*.cpp"
     )
-    add_library(xdp_aie_profile_plugin_xdna SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
-    add_library(xdp_aie_profile_plugin_zocl SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
+    # VE2 _xdna: aie_codegen (NPU path). VE2 _zocl: xaiengine (edge/sysroot path).
+    add_library(xdp_aie_profile_plugin_xdna SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
+    add_library(xdp_aie_profile_plugin_zocl SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
     add_dependencies(xdp_aie_profile_plugin_xdna xdp_core xrt_coreutil)
     add_dependencies(xdp_aie_profile_plugin_zocl xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_profile_plugin_xdna PRIVATE xdp_core xrt_coreutil aie_codegen)
     target_link_libraries(xdp_aie_profile_plugin_zocl PRIVATE xdp_core xrt_coreutil xaiengine)
-    target_compile_definitions(xdp_aie_profile_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on")
-    target_compile_definitions(xdp_aie_profile_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
-    target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src) # this uses aie_codegen include right? so we do not need this since:
-    # aie_codegen target sets PUBLIC target_include_directories (lines 53–61 in aie-codegen/src/CMakeLists.txt), 
-    # so any target that does target_link_libraries(… aie_codegen) gets those include paths automatically
+    target_compile_definitions(xdp_aie_profile_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX=on)
+    target_compile_definitions(xdp_aie_profile_plugin_zocl PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX=on)
+    if (DEFINED AIE_CODEGEN_DIR)
+      target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${AIE_CODEGEN_DIR}/include)
+    endif()
+    target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src) # TODO: do we need this?
     target_include_directories(xdp_aie_profile_plugin_zocl PRIVATE ${CMAKE_SOURCE_DIR}/src)
     set_target_properties(xdp_aie_profile_plugin_xdna PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
     set_target_properties(xdp_aie_profile_plugin_zocl PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
@@ -112,7 +121,7 @@ else()
       "${IMPL_DIR}/*.h"
       "${IMPL_DIR}/*.cpp"
     )
-    add_library(xdp_aie_profile_plugin SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES})
+    add_library(xdp_aie_profile_plugin SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
     add_dependencies(xdp_aie_profile_plugin xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_profile_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
     target_compile_definitions(xdp_aie_profile_plugin PRIVATE FAL_LINUX="on")

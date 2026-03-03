@@ -50,6 +50,9 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
     ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES})
   add_dependencies(xdp_aie_trace_plugin xdp_core xrt_coreutil)
   target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
+  if (DEFINED AIE_CODEGEN_DIR)
+    target_include_directories(xdp_aie_trace_plugin PRIVATE ${AIE_CODEGEN_DIR}/include)
+  endif()
   target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
   set_target_properties(xdp_aie_trace_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
@@ -108,9 +111,10 @@ else()
     target_link_libraries(xdp_aie_trace_plugin_zocl PRIVATE xdp_core xrt_coreutil xaiengine)
     target_compile_definitions(xdp_aie_trace_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on")
     target_compile_definitions(xdp_aie_trace_plugin_zocl PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
-    target_include_directories(xdp_aie_trace_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src) # xdna uses aie_codegen include right? so we do not need this since:
-    # aie_codegen target sets PUBLIC target_include_directories (lines 53–61 in aie-codegen/src/CMakeLists.txt), 
-    # so any target that does target_link_libraries(… aie_codegen) gets those include paths automatically
+    if (DEFINED AIE_CODEGEN_DIR)
+      target_include_directories(xdp_aie_trace_plugin_xdna PRIVATE ${AIE_CODEGEN_DIR}/include)
+    endif()
+    target_include_directories(xdp_aie_trace_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_include_directories(xdp_aie_trace_plugin_zocl PRIVATE ${CMAKE_SOURCE_DIR}/src)
     set_target_properties(xdp_aie_trace_plugin_xdna PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
     set_target_properties(xdp_aie_trace_plugin_zocl PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})

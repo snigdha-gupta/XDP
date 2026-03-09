@@ -7,6 +7,7 @@
 # to count cycles between core function start and end.
 # It is currently built on Client Windows Only.
 # =========================================================================
+# Client flow only: aie_codegen.
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_pc/clientDev")
@@ -30,9 +31,9 @@ if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_pc_plugin SHARED xdp_aie_pc_plugin-version.rc
     ${XDP_AIE_PC_PLUGIN_FILES} ${XDP_DEVICE_COMMON_FILES})
   add_dependencies(xdp_aie_pc_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_pc_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-  target_compile_definitions(xdp_aie_pc_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
-  target_include_directories(xdp_aie_pc_plugin PRIVATE ${AIERT_DIR}/include)
+  target_link_libraries(xdp_aie_pc_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
+  target_compile_definitions(xdp_aie_pc_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
+  target_include_directories(xdp_aie_pc_plugin PRIVATE ${AIE_CODEGEN_DIR}/include)
   set_target_properties(xdp_aie_pc_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
   install (TARGETS xdp_aie_pc_plugin

@@ -6,6 +6,7 @@
 # This builds the AIE Status plugin.  It is currently built on
 # Edge and VE2 platforms that support AIE.
 # ====================================================================
+# Client: N/A. Edge flow: xaiengine; VE2 handled in its block below.
 
 file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/plugin/aie_status/*.h"

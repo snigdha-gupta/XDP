@@ -39,7 +39,7 @@
 
 #include "xdp/profile/device/common/xdp_aie_driver.h"
 #ifdef XDP_USE_AIE_CODEGEN
-#include <events/xaie_events_aie.h>
+#include <xaie_events_aie.h>
 #else
 extern "C" {
 #include <xaiengine/xaie_events_aie.h>

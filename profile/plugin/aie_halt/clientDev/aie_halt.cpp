@@ -16,6 +16,15 @@
 
 #define XDP_PLUGIN_SOURCE
 
+#ifdef XDP_USE_AIE_CODEGEN
+#include <xaiemlgbl_params.h>
+#include <xaiegbl_params.h>
+#else
+extern "C" {
+#include <xaiengine/xaiemlgbl_params.h>
+}
+#endif
+
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -34,13 +43,6 @@
 #include "core/include/xclbin.h"
 
 #include "xdp/profile/device/common/xdp_aie_driver.h"
-#ifdef XDP_USE_AIE_CODEGEN
-#include <xaiemlgbl_params.h>
-#else
-extern "C" {
-#include <xaiengine/xaiemlgbl_params.h>
-}
-#endif
 
 #ifdef _WIN32
 # pragma warning ( disable : 4244 )

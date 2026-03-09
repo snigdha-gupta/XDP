@@ -6,7 +6,7 @@
 # This builds the AIE Status plugin.  It is currently built on
 # Edge and VE2 platforms that support AIE.
 # ====================================================================
-# Client: N/A. Edge flow: xaiengine; VE2 handled in its block below.
+# Client: N/A. Edge flow: xaiengine; VE2: handled in its block below.
 
 file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/plugin/aie_status/*.h"
@@ -15,6 +15,7 @@ file(GLOB AIE_STATUS_PLUGIN_FILES
   "${PROFILE_DIR}/writer/aie_status/*.cpp"
 )
 
+# TODO: why is there no XDP_VE2_ZOCL_BUILD for status plugin? 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_status_plugin SHARED ${AIE_STATUS_PLUGIN_FILES})
   add_dependencies(xdp_aie_status_plugin xdp_core)

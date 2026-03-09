@@ -32,6 +32,7 @@ file(GLOB AIE_DRIVER_COMMON_UTIL_FILES
   "${PROFILE_DIR}/device/common/*.cpp"
 )
 
+# TODO: why is there no XDP_VE2_ZOCL_BUILD for debug plugin? 
 if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)

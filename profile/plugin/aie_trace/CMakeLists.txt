@@ -105,14 +105,28 @@ else()
       "${IMPL_DIR}/*.cpp"
     )
 
+    # _xdna
     add_library(xdp_aie_trace_plugin_xdna SHARED ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_TRACE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
     add_dependencies(xdp_aie_trace_plugin_xdna xdp_core xrt_coreutil)
-    target_link_libraries(xdp_aie_trace_plugin_xdna PRIVATE xdp_core xrt_coreutil xaiengine)
-    target_compile_definitions(xdp_aie_trace_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on")
-    target_include_directories(xdp_aie_trace_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(xdp_aie_trace_plugin_xdna PRIVATE xdp_core xrt_coreutil aie_codegen)
+    target_compile_definitions(xdp_aie_trace_plugin_xdna PRIVATE XDP_VE2_BUILD=1 FAL_LINUX="on" XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
+    target_include_directories(xdp_aie_trace_plugin_xdna PRIVATE ${AIE_CODEGEN_DIR}/include)
     set_target_properties(xdp_aie_trace_plugin_xdna PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
     install (TARGETS xdp_aie_trace_plugin_xdna
+      RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
+      LIBRARY DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT} ${XRT_NAMELINK_SKIP}
+    )
+
+    # _zocl
+    add_library(xdp_aie_trace_plugin_zocl SHARED ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_TRACE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
+    add_dependencies(xdp_aie_trace_plugin_zocl xdp_core xrt_coreutil)
+    target_link_libraries(xdp_aie_trace_plugin_zocl PRIVATE xdp_core xrt_coreutil xaiengine)
+    target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
+    target_include_directories(xdp_aie_trace_plugin_zocl PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    set_target_properties(xdp_aie_trace_plugin_zocl PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
+
+    install (TARGETS xdp_aie_trace_plugin_zocl
       RUNTIME DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT}
       LIBRARY DESTINATION ${XDP_PLUGIN_INSTALL_DIR} COMPONENT ${XRT_COMPONENT} ${XRT_NAMELINK_SKIP}
     )
@@ -135,11 +149,7 @@ else()
     add_library(xdp_aie_trace_plugin SHARED ${AIE_TRACE_PLUGIN_FILES} ${AIE_TRACE_COMPONENT_FILES} ${AIE_TRACE_UTIL_FILES} ${AIE_TRACE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES})
     add_dependencies(xdp_aie_trace_plugin xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_trace_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-    if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
-      target_compile_definitions(xdp_aie_trace_plugin PRIVATE XDP_VE2_ZOCL_BUILD=1 FAL_LINUX="on")
-    else()
-      target_compile_definitions(xdp_aie_trace_plugin PRIVATE FAL_LINUX="on")
-    endif()
+    target_compile_definitions(xdp_aie_trace_plugin PRIVATE FAL_LINUX="on")
     set_target_properties(xdp_aie_trace_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
     install (TARGETS xdp_aie_trace_plugin

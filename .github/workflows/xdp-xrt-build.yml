@@ -1,6 +1,8 @@
 name: XDP Build
 
 on:
+  push: 
+    branches: [ edge_github_actions ] # test branch
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches: [ master ]

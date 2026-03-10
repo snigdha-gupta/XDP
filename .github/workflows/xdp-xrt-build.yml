@@ -97,14 +97,52 @@ jobs:
           echo "- XDP Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
             
-  # Future job for edge builds
+  # # Future job for edge builds
+  # build-xrt-edge:
+  #   if: contains(github.event.pull_request.labels.*.name, 'build-edge')
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Placeholder for edge build
+  #       run: echo "Edge build would go here"
+
   build-xrt-edge:
-    if: contains(github.event.pull_request.labels.*.name, 'build-edge')
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    # IMPORTANT: use same runner class as XRT, not ubuntu-latest
+    runs-on: [self-hosted, Ubuntu-22.04]
+    timeout-minutes: 240  # edge build can be slow; adjust as needed
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Placeholder for edge build
-        run: echo "Edge build would go here"
-        
+      # 1) Checkout XDP PR
+      - name: Checkout XDP PR
+        uses: actions/checkout@v4
+        with:
+          path: xdp-pr
+          fetch-depth: 0
+      # 2) Clone XRT and submodules 
+      - name: Clone XRT Repository
+        run: |
+          git clone https://github.com/Xilinx/XRT.git XRT
+          cd XRT
+          git submodule update --init --recursive
+      # 3) Apply XDP PR into XRT tree
+      - name: Apply XDP PR Changes to XRT
+        run: |
+          rm -rf XRT/src/runtime_src/xdp
+          cp -r xdp-pr XRT/src/runtime_src/xdp
+      # 4) Debug mounts so you can confirm /proj/petalinux is there
+      - name: Check /proj/petalinux visibility
+        run: |
+          echo "Mounts containing /proj:"
+          mount | grep /proj || echo "No /proj mounts found"
+          echo
+          echo "List /proj:"
+          ls -al /proj || true
+          echo
+          echo "List /proj/petalinux:"
+          ls -al /proj/petalinux || true
+          
   # Future job for client builds
   build-xrt-client:
     if: contains(github.event.pull_request.labels.*.name, 'build-client')

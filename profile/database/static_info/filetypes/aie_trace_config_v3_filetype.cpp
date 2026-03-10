@@ -188,6 +188,7 @@ AIETraceConfigV3Filetype::getTiles(const std::string& graph_name,
     }
 
     // Helper: tile has at least one DMA channel (used to select only DMA tiles for memory metric set)
+    xrt_core::message::send(severity_level::debug, "XRT", "AIE metadata: checking for DMA channels on tiles.");
     auto hasDmaChannels = [](const tile_type& t) {
         for (const auto& s : t.s2mm_names)
             if (!s.empty() && s != "unused") return true;

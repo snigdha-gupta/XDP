@@ -109,12 +109,8 @@ jobs:
 
   build-xrt-edge:
     if: github.event_name == 'push'
-    # IMPORTANT: use same runner class as XRT, not ubuntu-latest
-    runs-on: [self-hosted, Ubuntu-22.04]
-    timeout-minutes: 240  # edge build can be slow; adjust as needed
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       # 1) Checkout XDP PR
       - name: Checkout XDP PR
@@ -133,17 +129,23 @@ jobs:
         run: |
           rm -rf XRT/src/runtime_src/xdp
           cp -r xdp-pr XRT/src/runtime_src/xdp
-      # 4) Debug mounts so you can confirm /proj/petalinux is there
-      - name: Check /proj/petalinux visibility
+      # 4) Test Docker image for petalinux
+      - name: Test Docker image for petalinux
         run: |
-          echo "Mounts containing /proj:"
-          mount | grep /proj || echo "No /proj mounts found"
-          echo
-          echo "List /proj:"
-          ls -al /proj || true
-          echo
-          echo "List /proj/petalinux:"
-          ls -al /proj/petalinux || true
+          docker pull artifactory.xilinx.com/xrt-docker-build/xrt:centos_8.1
+          # Check if petalinux is available inside the container
+          docker run --rm \
+            artifactory.xilinx.com/xrt-docker-build/xrt:centos_8.1 \
+            bash -c "ls -la /proj/petalinux 2>/dev/null || echo 'No /proj/petalinux in image'"
+      # 5) Attempt Edge Build
+      - name: Edge Build
+        run: |
+          # Try running without mounting /proj - only works if petalinux is in the image
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/XRT/build \
+            artifactory.xilinx.com/xrt-docker-build/xrt:centos_8.1 \
+            bash -c "chmod +x build_edge.sh && ./build_edge.sh -aarch versal"
           
   # Future job for client builds
   build-xrt-client:

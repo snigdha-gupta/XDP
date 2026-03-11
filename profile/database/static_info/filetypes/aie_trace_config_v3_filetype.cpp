@@ -139,7 +139,9 @@ AIETraceConfigV3Filetype::getTiles(const std::string& graph_name,
         auto coreCol = mapping.second.get<uint8_t>("column");
         auto coreRow = static_cast<uint8_t>(mapping.second.get<uint8_t>("row") + rowOffset);
 
-        // Create or get existing core tile
+        // Create or get existing core tile.
+        // active_memory is set only when this tile appears in dmaChannels (below), to match
+        // normal behavior: profile filters by active_memory (only DMA), trace uses full list (both).
         auto coreKey = std::make_pair(coreCol, coreRow);
         bool isAieTile = (mapping.second.get<std::string>("tile", "") == "aie");
         if (tileMap.find(coreKey) == tileMap.end()) {
@@ -147,12 +149,12 @@ AIETraceConfigV3Filetype::getTiles(const std::string& graph_name,
             coreTile.col = coreCol;
             coreTile.row = coreRow;
             coreTile.active_core = isAieTile;
-            coreTile.active_memory = isAieTile;
+            coreTile.active_memory = false;  // set true only from dmaChannels
             tileMap[coreKey] = coreTile;
         } else {
             if (isAieTile) {
                 tileMap[coreKey].active_core = true;
-                tileMap[coreKey].active_memory = true;
+                // leave active_memory as-is; set true only from dmaChannels
             }
         }
 
@@ -187,24 +189,15 @@ AIETraceConfigV3Filetype::getTiles(const std::string& graph_name,
         }
     }
 
-    // Helper: tile has at least one DMA channel (used to select only DMA tiles for memory metric set)
-    xrt_core::message::send(severity_level::debug, "XRT", "AIE metadata: checking for DMA channels on tiles.");
-    auto hasDmaChannels = [](const tile_type& t) {
-        for (const auto& s : t.s2mm_names)
-            if (!s.empty() && s != "unused") return true;
-        for (const auto& s : t.mm2s_names)
-            if (!s.empty() && s != "unused") return true;
-        return false;
-    };
-
+    // Match normal behavior: for module_type::dma return full list (core + DMA) with active_memory
+    // set only on DMA tiles. Profile filters by active_memory (only DMA); trace uses all (both).
     std::vector<tile_type> tiles;
     for (const auto& pair : tileMap) {
         const tile_type& tile = pair.second;
 
         if ((type == module_type::core) && tile.active_core) {
             tiles.push_back(tile);
-        } else if ((type == module_type::dma) && tile.active_memory && hasDmaChannels(tile)) {
-            // Only include tiles that actually have DMA channels for memory module metrics
+        } else if (type == module_type::dma) {
             tiles.push_back(tile);
         }
     }

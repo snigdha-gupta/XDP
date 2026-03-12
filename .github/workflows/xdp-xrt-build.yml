@@ -1,6 +1,8 @@
 name: XDP Build
 
 on:
+  push: 
+    branches: [ edge_yml ] # test branch
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches: [ master ]
@@ -97,14 +99,66 @@ jobs:
           echo "- XDP Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
             
-  # Future job for edge builds
+  # Edge build: uses XRT's Docker image (build_action L18); /proj/petalinux etc. are inside the image, not mounted from host.
   build-xrt-edge:
-    if: contains(github.event.pull_request.labels.*.name, 'build-edge')
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Optional: set XRT_RELEASE repo variable if the image uses a different Vitis path
+      RELEASE: ${{ vars.XRT_RELEASE }}
     steps:
-      - name: Placeholder for edge build
-        run: echo "Edge build would go here"
-        
+      - name: Checkout XDP PR
+        uses: actions/checkout@v4
+        with:
+          path: xdp-pr
+          fetch-depth: 0
+
+      - name: Clone XRT Repository
+        run: |
+          git clone https://github.com/Xilinx/XRT.git XRT
+          cd XRT
+          git submodule update --init --recursive
+
+      - name: Apply XDP PR Changes to XRT
+        run: |
+          rm -rf XRT/src/runtime_src/xdp
+          cp -r xdp-pr XRT/src/runtime_src/xdp
+
+      - name: Set release for Vitis settings path (inside image)
+        run: |
+          echo "RELEASE=${RELEASE:-2024.2}" >> $GITHUB_ENV
+
+      - name: Prepare APU workspace dir
+        run: mkdir -p "${{ github.workspace }}/tmp_${{ github.run_number }}/apu"
+
+      - name: Pull edge build Docker image (same as XRT build_action L18)
+        run: |
+          docker pull artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04
+
+      # Only mount workspace; /proj/petalinux, Vitis, etc. are inside the image.
+      - name: Build for edge (build_edge.sh -aarch versal)
+        env:
+          WORKSPACE: ${{ github.workspace }}
+          BUILD_NUM: ${{ github.run_number }}
+          SETTINGS_PATH: /proj/xbuilds/CustTA/${{ env.RELEASE }}_daily_latest/installs/lin64/${{ env.RELEASE }}/Vitis
+        run: |
+          docker run --rm \
+            -u xbuild \
+            -v ${WORKSPACE}/XRT:/opt/xrt \
+            -w /opt/xrt/build \
+            -v ${WORKSPACE}/tmp_${BUILD_NUM}/apu:/tmp \
+            -e XRT_VERSION_PATCH=${BUILD_NUM} \
+            artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04 \
+            bash -c "unset http_proxy https_proxy && source ${SETTINGS_PATH}/settings64.sh && /opt/xrt/build/build_edge.sh -aarch versal -full"
+
+      - name: Edge build summary
+        if: always()
+        run: |
+          echo "## XDP Edge Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04 (paths like /proj/petalinux are inside the image)" >> $GITHUB_STEP_SUMMARY
+          echo "- Command: build_edge.sh -aarch versal -full" >> $GITHUB_STEP_SUMMARY
+
   # Future job for client builds
   build-xrt-client:
     if: contains(github.event.pull_request.labels.*.name, 'build-client')

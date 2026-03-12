@@ -99,45 +99,50 @@ jobs:
           echo "- XDP Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
         fi
             
-  # Edge build: uses XRT's Docker image (build_action L18); /proj/petalinux etc. are inside the image, not mounted from host.
+  # Edge build: same as XRT (xrt_ci.yml apu-package-build + build-action index.js L77-79).
+  # Uses runs-on: apu so the runner has /proj/petalinux, /proj/xbuilds, etc. on the host; they are mounted into the container.
+  # Layout: XRT tree at workspace/run_number (like XRT checkout path) so it matches build-action's workspace/buildNumber.
   build-xrt-edge:
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: apu
+    timeout-minutes: 120
     env:
-      # Optional: set XRT_RELEASE repo variable if the image uses a different Vitis path
       RELEASE: ${{ vars.XRT_RELEASE }}
+      # Same volume inputs as build-action (runner must have these paths); override via repo vars if needed
+      TOOLS_BATONROOT: "-v /tools/batonroot:/tools/batonroot"
+      PROJ: "-v /proj/xbb:/proj/xbb"
+      PROJ_XBUILDS: "-v /proj/xbuilds:/proj/xbuilds"
     steps:
-      - name: Checkout XDP PR
+      - name: Set env variables
+        run: |
+          echo "XRT_VERSION_PATCH=${{ github.run_number }}" >> $GITHUB_ENV
+          echo "PATH=/usr/bin:$PATH" >> $GITHUB_ENV
+          echo "RELEASE=${RELEASE:-2024.2}" >> $GITHUB_ENV
+
+      - name: Clone XRT at workspace/run_number (same layout as XRT: build-action expects repo at workspace/buildNumber)
+        run: |
+          git clone https://github.com/Xilinx/XRT.git "${{ github.workspace }}/${{ github.run_number }}"
+          cd "${{ github.workspace }}/${{ github.run_number }}"
+          git submodule update --init --recursive
+
+      - name: Checkout XDP PR and apply into XRT tree (same pattern as XRT apu-package-build)
         uses: actions/checkout@v4
         with:
           path: xdp-pr
           fetch-depth: 0
 
-      - name: Clone XRT Repository
+      - name: Apply XDP into XRT tree
         run: |
-          git clone https://github.com/Xilinx/XRT.git XRT
-          cd XRT
-          git submodule update --init --recursive
+          rm -rf "${{ github.workspace }}/${{ github.run_number }}/src/runtime_src/xdp"
+          cp -r "${{ github.workspace }}/xdp-pr" "${{ github.workspace }}/${{ github.run_number }}/src/runtime_src/xdp"
 
-      - name: Apply XDP PR Changes to XRT
-        run: |
-          rm -rf XRT/src/runtime_src/xdp
-          cp -r xdp-pr XRT/src/runtime_src/xdp
-
-      - name: Set release for Vitis settings path (inside image)
-        run: |
-          echo "RELEASE=${RELEASE:-2024.2}" >> $GITHUB_ENV
-
-      - name: Prepare APU workspace dir
+      - name: Prepare APU tmp dir (build_action creates workspace/tmp_buildNumber/apu)
         run: mkdir -p "${{ github.workspace }}/tmp_${{ github.run_number }}/apu"
 
-      - name: Pull edge build Docker image (same as XRT build_action L18)
-        run: |
-          docker pull artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04
+      - name: Pull edge build Docker image (build_action L18)
+        run: docker pull artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04
 
-      # Only mount workspace; /proj/petalinux, Vitis, etc. are inside the image.
-      - name: Build for edge (build_edge.sh -aarch versal)
+      - name: Build for edge (same docker run as build_action index.js L79, build_edge.sh -aarch versal -full)
         env:
           WORKSPACE: ${{ github.workspace }}
           BUILD_NUM: ${{ github.run_number }}
@@ -145,7 +150,22 @@ jobs:
         run: |
           docker run --rm \
             -u xbuild \
-            -v ${WORKSPACE}/XRT:/opt/xrt \
+            ${{ env.TOOLS_BATONROOT }} \
+            ${{ env.PROJ }} \
+            -v /group/sw:/group/sw \
+            -v /group/xcofarm:/group/xcofarm \
+            -v /proj/dsv:/proj/dsv \
+            -v /proj/petalinux:/proj/petalinux \
+            -v /proj/rdi-xco:/proj/rdi-xco \
+            ${{ env.PROJ_XBUILDS }} \
+            -v /proj/yocto:/proj/yocto \
+            -v /var/lib/nfs/rpc_pipefs:/var/lib/nfs/rpc_pipefs \
+            -v /home/xbuild:/home/xbuild \
+            -v /tools/baton:/tools/baton \
+            -v /tools/xint:/tools/xint \
+            -v /wrk/HEAD:/wrk/HEAD \
+            -v /wrk/ci:/wrk/ci \
+            -v ${WORKSPACE}/${BUILD_NUM}:/opt/xrt \
             -w /opt/xrt/build \
             -v ${WORKSPACE}/tmp_${BUILD_NUM}/apu:/tmp \
             -e XRT_VERSION_PATCH=${BUILD_NUM} \
@@ -155,8 +175,9 @@ jobs:
       - name: Edge build summary
         if: always()
         run: |
-          echo "## XDP Edge Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Image: artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04 (paths like /proj/petalinux are inside the image)" >> $GITHUB_STEP_SUMMARY
+          echo "## XDP Edge Build Summary (same as XRT apu-package + build_action)" >> $GITHUB_STEP_SUMMARY
+          echo "- Runner: apu (host has /proj/petalinux, etc.; mounted into container)" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: artifactory.xilinx.com/devops/embedded-platform-ubuntu-latest-20.04" >> $GITHUB_STEP_SUMMARY
           echo "- Command: build_edge.sh -aarch versal -full" >> $GITHUB_STEP_SUMMARY
 
   # Future job for client builds

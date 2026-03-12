@@ -119,7 +119,7 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> $GITHUB_ENV
           echo "RELEASE=${RELEASE:-2024.2}" >> $GITHUB_ENV
 
-      - name: Clone XRT at workspace/run_number (same layout as XRT: build-action expects repo at workspace/buildNumber)
+      - name: Clone XRT
         run: |
           git clone https://github.com/Xilinx/XRT.git "${{ github.workspace }}/${{ github.run_number }}"
           cd "${{ github.workspace }}/${{ github.run_number }}"

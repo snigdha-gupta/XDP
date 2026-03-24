@@ -20,11 +20,7 @@
 
 #include "xdp/profile/device/tracedefs.h"
 
-extern "C"
-{
-  #include "xaiengine/xaiegbl.h"
-  #include <xaiengine.h>
-}
+#include "xdp/profile/device/common/xdp_aie_driver.h"
 
 namespace xdp {
 

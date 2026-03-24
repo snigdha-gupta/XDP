@@ -48,9 +48,9 @@ if (XDP_VE2_BUILD_CMAKE STREQUAL "yes")
 elseif (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   add_library(xdp_aie_debug_plugin SHARED ${AIE_DEBUG_PLUGIN_FILES} ${AIE_DRIVER_COMMON_UTIL_FILES})
   add_dependencies(xdp_aie_debug_plugin xdp_core xrt_coreutil)
-  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil xaiengine)
-  target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC)
-  target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIERT_DIR}/include)
+  target_link_libraries(xdp_aie_debug_plugin PRIVATE xdp_core xrt_coreutil aie_codegen)
+  target_compile_definitions(xdp_aie_debug_plugin PRIVATE XDP_CLIENT_BUILD=1 -DXAIE_FEATURE_MSVC XDP_USE_AIE_CODEGEN=${XDP_USE_AIE_CODEGEN})
+  target_include_directories(xdp_aie_debug_plugin PRIVATE ${AIE_CODEGEN_DIR}/include)
   set_target_properties(xdp_aie_debug_plugin PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})
 
   install (TARGETS xdp_aie_debug_plugin

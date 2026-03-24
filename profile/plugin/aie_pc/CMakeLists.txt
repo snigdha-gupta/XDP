@@ -7,6 +7,7 @@
 # to count cycles between core function start and end.
 # It is currently built on Client Windows Only.
 # =========================================================================
+# Client flow: aie_codegen. Edge: N/A; VE2: N/A
 
 if (XDP_CLIENT_BUILD_CMAKE STREQUAL "yes")
   set(IMPL_DIR "${PROFILE_DIR}/plugin/aie_pc/clientDev")

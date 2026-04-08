@@ -9,6 +9,10 @@
 #include "core/edge/common/aie_parser.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_impl.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
+#ifndef XDP_VE2_ZOCL_BUILD
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#include "xrt/xrt_bo.h"
+#endif
 #include "xaiefal/xaiefal.hpp"
 
 extern "C" {
@@ -40,7 +44,9 @@ namespace xdp {
       void endPoll() override;
 
       void freeResources();
+#ifdef XDP_VE2_ZOCL_BUILD
       bool checkAieDevice(const uint64_t deviceId, void* handle);
+#endif
 
       bool setMetricsSettings(const uint64_t deviceId, void* handle);
       void printTileModStats(xaiefal::XAieDev* aieDevice, 
@@ -68,6 +74,7 @@ namespace xdp {
       std::pair<int, XAie_Events>
       setupBroadcastChannel(const tile_type& currTileLoc);
 
+#ifdef XDP_VE2_ZOCL_BUILD
       inline std::shared_ptr<xaiefal::XAiePerfCounter>
       startCounter(std::shared_ptr<xaiefal::XAiePerfCounter>& pc,
                    XAie_Events counterEvent, XAie_Events& retCounterEvent)
@@ -86,13 +93,21 @@ namespace xdp {
 
       std::pair<int, XAie_Events>
       getShimBroadcastChannel(const tile_type& srcTile);
+#endif
 
-      void
-      displayAdfAPIResults();
+#ifdef XDP_VE2_ZOCL_BUILD
+      void displayAdfAPIResults();
+#else
+      void generatePollElf();
+#endif
 
     private:
       XAie_DevInst*     aieDevInst = nullptr;
-      xaiefal::XAieDev* aieDevice  = nullptr;    
+#ifdef XDP_VE2_ZOCL_BUILD
+      xaiefal::XAieDev* aieDevice  = nullptr;
+#else
+      XAie_DevInst      xdnaAieDevInst = {0};
+#endif
 
       std::map<std::string, std::vector<XAie_Events>> coreStartEvents;
       std::map<std::string, std::vector<XAie_Events>> coreEndEvents;
@@ -104,6 +119,8 @@ namespace xdp {
       std::map<std::string, std::vector<XAie_Events>> memTileEndEvents; 
       std::map<std::string, std::vector<uint32_t>> microcontrollerEvents;
       std::map<tile_type, std::vector<uint32_t>> microcontrollerTileEvents;
+
+#ifdef XDP_VE2_ZOCL_BUILD
       std::vector<std::shared_ptr<xaiefal::XAiePerfCounter>> perfCounters;
       std::vector<std::shared_ptr<xaiefal::XAieStreamPortSelect>> streamPorts;
 
@@ -122,6 +139,15 @@ namespace xdp {
 
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesBytesTx;
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesLatency;
+#endif
+
+#ifndef XDP_VE2_ZOCL_BUILD
+      std::unique_ptr<aie::VE2Transaction> tranxHandler;
+      std::vector<u32> op_profile_data;
+      std::vector<std::vector<uint64_t>> outputValues;
+      xrt::bo resultBO;
+      bool finishedPoll = false;
+#endif
   };
 }   
 

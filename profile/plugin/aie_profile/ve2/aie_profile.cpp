@@ -32,7 +32,12 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "core/common/api/hw_context_int.h"
 #include "shim_ve2/xdna_hwctx.h"
+#ifndef XDP_VE2_ZOCL_BUILD
+#include "core/common/api/bo_int.h"
+#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
+#endif
 
+#ifdef XDP_VE2_ZOCL_BUILD
 namespace {
   static void* fetchAieDevInst(void* devHandle)
   {
@@ -58,6 +63,7 @@ namespace {
       delete object ;
   }
 } // end anonymous namespace
+#endif // XDP_VE2_ZOCL_BUILD
 
 namespace xdp {
   using tile_type = xdp::tile_type;
@@ -92,8 +98,14 @@ namespace xdp {
     memTileEndEvents = memTileStartEvents;
     
     microcontrollerEvents = aie::profile::getMicrocontrollerEventSets(hwGen);
+
+    // Create transaction handler for VE2 for XDNA mode only
+#ifndef XDP_VE2_ZOCL_BUILD
+    tranxHandler = std::make_unique<aie::VE2Transaction>();
+#endif
   }
 
+#ifdef XDP_VE2_ZOCL_BUILD
   bool AieProfile_VE2Impl::checkAieDevice(const uint64_t deviceId, void* handle)
   {
     aieDevInst = static_cast<XAie_DevInst*>(db->getStaticInfo().getAieDevInst(fetchAieDevInst, handle, deviceId)) ;
@@ -105,84 +117,154 @@ namespace xdp {
     }
     return true;
   }
+#endif // XDP_VE2_ZOCL_BUILD
 
   void AieProfile_VE2Impl::updateDevice() {
+#ifdef XDP_VE2_ZOCL_BUILD
+    // ZOCL path: fetch live DevInst and FAL device from shim
+    if (!checkAieDevice(deviceID, metadata->getHandle()))
+      return;
 
-      if(!checkAieDevice(deviceID, metadata->getHandle()))
-              return;
-
-      // Check if dtrace_debug is enabled and set control file path BEFORE submitNopElf
-      // This is critical because xrt_module.cpp calls get_dtrace_control_file_path() 
-      // during module creation, and config reader locks keys after first access
-      bool dtraceDebug = xrt_core::config::get_aie_profile_settings_dtrace_debug();
-      if (dtraceDebug) {
-        std::string ctFilePath = (std::filesystem::current_path() / "aie_profile.ct").string();
-        try {
-          xrt_core::config::detail::set("Debug.dtrace_control_file_path", ctFilePath);
-          std::stringstream msg;
-          msg << "AIE Profile: Set dtrace_control_file_path to '" << ctFilePath << "'";
-          xrt_core::message::send(severity_level::info, "XRT", msg.str());
-        }
-        catch (const std::exception& e) {
-          std::stringstream msg;
-          msg << "AIE Profile: Could not set dtrace_control_file_path: " << e.what();
-          xrt_core::message::send(severity_level::warning, "XRT", msg.str());
-        }
+    // Check if dtrace_debug is enabled and set control file path BEFORE submitNopElf
+    // This is critical because xrt_module.cpp calls get_dtrace_control_file_path() 
+    // during module creation, and config reader locks keys after first access
+    bool dtraceDebug = xrt_core::config::get_aie_profile_settings_dtrace_debug();
+    if (dtraceDebug) {
+      std::string ctFilePath = (std::filesystem::current_path() / "aie_profile.ct").string();
+      try {
+        xrt_core::config::detail::set("Debug.dtrace_control_file_path", ctFilePath);
+        std::stringstream msg;
+        msg << "AIE Profile: Set dtrace_control_file_path to '" << ctFilePath << "'";
+        xrt_core::message::send(severity_level::info, "XRT", msg.str());
       }
+      catch (const std::exception& e) {
+        std::stringstream msg;
+        msg << "AIE Profile: Could not set dtrace_control_file_path: " << e.what();
+        xrt_core::message::send(severity_level::warning, "XRT", msg.str());
+      }
+    }
 
-      // Submit nop.elf before configuring profile
-      if (!aie::submitNopElf(metadata->getHandle())) {
+    // Submit nop.elf before configuring profile
+    if (!aie::submitNopElf(metadata->getHandle())) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "Failed to submit nop.elf. AIE profile configuration will not proceed.");
+      return;
+    }
+
+    bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
+    // Generate CT file for AIE profile counters after metrics settings are configured
+    if (runtimeCounters && dtraceDebug) {
+      AieProfileCTWriter ctWriter(db, metadata, deviceID);
+      ctWriter.generate();
+    }
+
+    if (!runtimeCounters) {
+      std::shared_ptr<xrt_core::device> device = xrt_core::get_userpf_device(metadata->getHandle());
+      auto counters = xrt_core::edge::aie::get_profile_counters(device.get());
+
+      if (counters.empty()) {
+        xrt_core::message::send(severity_level::warning, "XRT", 
+          "AIE Profile Counters were not found for this design. Please specify tile_based_[aie|aie_memory|interface_tile]_metrics under \"AIE_profile_settings\" section in your xrt.ini.");
+        (db->getStaticInfo()).setIsAIECounterRead(deviceID,true);
+        return;
+      }
+      else {
+        XAie_DevInst* localDevInst =
+          static_cast<XAie_DevInst*>(db->getStaticInfo().getAieDevInst(fetchAieDevInst, metadata->getHandle()));
+
+        if (!localDevInst) {
+          xrt_core::message::send(severity_level::warning, "XRT", 
+            "Failed to get AIE device instance for profile counters.");
+          return;
+        }
+
+        xrt_core::message::send(severity_level::debug, "XRT", "Processing " + std::to_string(counters.size()) + " counters");
+        for (auto& counter : counters) {
+          std::stringstream msg;
+          msg << "Adding counter " << counter.id << " at (" 
+              << +counter.column << "," << +counter.row << ") module: " << counter.module;
+          xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+
+          // For pre-configured counters from xclbin metadata, the hardware is already configured.
+          // Payload set to 0 as we lack full tile information (stream_ids, is_master_vec).
+          uint64_t payload = 0;
+          (db->getStaticInfo()).addAIECounter(deviceID, counter.id, counter.column,
+              counter.row, counter.counterNumber, counter.startEvent, counter.endEvent,
+              counter.resetEvent, payload, counter.clockFreqMhz, counter.module, counter.name);
+        }
+        xrt_core::message::send(severity_level::debug, "XRT", "Finished processing counters");
+      }
+    }
+
+#else
+    // XDNA path: locally initialize XAie_DevInst, record XAie_* calls to ASM via
+    // control-code backend, then assemble to ELF and submit.
+    xrt_core::message::send(severity_level::info, "XRT",
+        "AIE Profile: Initializing XDNA asm->elf transaction.");
+
+    xdp::aie::driver_config meta_config = metadata->getAIEConfigMetadata();
+    XAie_Config cfg {
+      meta_config.hw_gen,
+      meta_config.base_address,
+      meta_config.column_shift,
+      meta_config.row_shift,
+      meta_config.num_rows,
+      meta_config.num_columns,
+      meta_config.shim_row,
+      meta_config.mem_row_start,
+      meta_config.mem_num_rows,
+      meta_config.aie_tile_row_start,
+      meta_config.aie_tile_num_rows,
+      {0}  // PartProp
+    };
+
+    auto RC = XAie_CfgInitialize(&xdnaAieDevInst, &cfg);
+    if (RC != XAIE_OK) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: XAie_CfgInitialize failed. Cannot configure AIE profiling.");
+      return;
+    }
+    aieDevInst = &xdnaAieDevInst;
+
+    if (!tranxHandler->initializeTransaction(aieDevInst, "AieProfileMetrics"))
+      return;
+
+    bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
+
+    if (runtimeCounters) {
+      auto hwContext = metadata->getHwContext();
+      if (!tranxHandler->submitTransaction(aieDevInst, hwContext)) {
         xrt_core::message::send(severity_level::warning, "XRT",
-            "Failed to submit nop.elf. AIE profile configuration will not proceed.");
+            "AIE Profile: Failed to submit config transaction ELF.");
+        return;
+      }
+      xrt_core::message::send(severity_level::info, "XRT",
+          "AIE Profile: Successfully configured AIE profiling via XDNA asm->elf transaction.");
+
+      // Create result buffer to receive counter values from the poll ELF
+      constexpr uint32_t resultBOSize = 0x20000;
+      try {
+        resultBO = xrt_core::bo_int::create_debug_bo(hwContext, resultBOSize);
+        uint32_t* output = resultBO.map<uint32_t*>();
+        memset(output, 0, resultBOSize);
+        xrt_core::message::send(severity_level::debug, "XRT",
+            "AIE Profile: Created result BO for poll ELF.");
+      }
+      catch (const std::exception& e) {
+        std::stringstream msg;
+        msg << "AIE Profile: Unable to create result BO for poll ELF: " << e.what();
+        xrt_core::message::send(severity_level::warning, "XRT", msg.str());
         return;
       }
 
-      bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
-      // Generate CT file for AIE profile counters after metrics settings are configured
-      if (runtimeCounters && dtraceDebug) {
-        AieProfileCTWriter ctWriter(db, metadata, deviceID);
-        ctWriter.generate();
-      }
-  
-      if (!runtimeCounters) {
-        std::shared_ptr<xrt_core::device> device = xrt_core::get_userpf_device(metadata->getHandle());
-        auto counters = xrt_core::edge::aie::get_profile_counters(device.get());
-
-        if (counters.empty()) {
-          xrt_core::message::send(severity_level::warning, "XRT", 
-            "AIE Profile Counters were not found for this design. Please specify tile_based_[aie|aie_memory|interface_tile]_metrics under \"AIE_profile_settings\" section in your xrt.ini.");
-          (db->getStaticInfo()).setIsAIECounterRead(deviceID,true);
-          return;
-        }
-        else {
-          XAie_DevInst* aieDevInst =
-            static_cast<XAie_DevInst*>(db->getStaticInfo().getAieDevInst(fetchAieDevInst, metadata->getHandle()));
-          
-          if (!aieDevInst) {
-            xrt_core::message::send(severity_level::warning, "XRT", 
-              "Failed to get AIE device instance for profile counters.");
-            return;
-          }
-
-          xrt_core::message::send(severity_level::debug, "XRT", "Processing " + std::to_string(counters.size()) + " counters");
-          for (auto& counter : counters) {
-            std::stringstream msg;
-            msg << "Adding counter " << counter.id << " at (" 
-                << +counter.column << "," << +counter.row << ") module: " << counter.module;
-            xrt_core::message::send(severity_level::debug, "XRT", msg.str());
-            
-            // For pre-configured counters from xclbin metadata, the hardware is already configured
-            // Payload is used for reporting metadata (channel/stream IDs), set to 0 for these counters
-            // as we don't have full tile information (stream_ids, is_master_vec) to safely compute it
-            uint64_t payload = 0;
-            
-            (db->getStaticInfo()).addAIECounter(deviceID, counter.id, counter.column,
-                counter.row, counter.counterNumber, counter.startEvent, counter.endEvent,
-                counter.resetEvent, payload, counter.clockFreqMhz, counter.module, counter.name);
-          }
-          xrt_core::message::send(severity_level::debug, "XRT", "Finished processing counters");
-        }
-      }
+      // Generate and submit the poll ELF (reads counter registers → resultBO)
+      generatePollElf();
+    }
+    else {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: No runtime counters configured for XDNA path.");
+    }
+#endif // XDP_VE2_ZOCL_BUILD
   }
 
   // Get reportable payload specific for this tile and/or counter
@@ -333,6 +415,7 @@ namespace xdp {
     int counterId = 0;
     bool runtimeCounters = false;
 
+#ifdef XDP_VE2_ZOCL_BUILD
     auto stats = aieDevice->getRscStat(XAIEDEV_DEFAULT_GROUP_AVAIL);
     auto hwGen = metadata->getHardwareGen();
     auto configChannel0 = metadata->getConfigChannel0();
@@ -583,7 +666,187 @@ namespace xdp {
     } // modules
 
     return runtimeCounters;
+
+#else // !XDP_VE2_ZOCL_BUILD — XDNA path: raw XAie_* calls recorded to control-code ASM
+
+    auto hwGen = metadata->getHardwareGen();
+    auto configChannel0 = metadata->getConfigChannel0();
+    auto configChannel1 = metadata->getConfigChannel1();
+    uint8_t startColShift = 0;  // NPU3 pattern: use 0 for XDNA
+
+    // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF
+    static const std::map<module_type, std::vector<uint64_t>> regValues = {
+      {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
+                               aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
+      {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,
+                               aie2ps::mm_performance_counter2,   aie2ps::mm_performance_counter3}},
+      {module_type::shim,     {aie2ps::shim_performance_counter0, aie2ps::shim_performance_counter1,
+                               aie2ps::shim_performance_counter2, aie2ps::shim_performance_counter3}},
+      {module_type::mem_tile, {aie2ps::mem_performance_counter0,  aie2ps::mem_performance_counter1,
+                               aie2ps::mem_performance_counter2,  aie2ps::mem_performance_counter3}}
+    };
+
+    for (int module = 0; module < metadata->getNumModules(); ++module) {
+      auto configMetrics = metadata->getConfigMetricsVec(module);
+      if (configMetrics.empty())
+        continue;
+
+      int numTileCounters[metadata->getNumCountersMod(module)+1] = {0};
+      XAie_ModuleType mod = aie::profile::getFalModuleType(module);
+
+      for (auto& tileMetric : configMetrics) {
+        auto& metricSet = tileMetric.second;
+        auto  tile      = tileMetric.first;
+        auto  col       = tile.col + startColShift;
+        auto  row       = tile.row;
+        auto  subtype   = tile.subtype;
+        auto  type      = aie::getModuleType(row, metadata->getAIETileRowOffset());
+        if ((mod == XAIE_MEM_MOD) && (type == module_type::core))
+          type = module_type::dma;
+
+        if (!aie::profile::isValidType(type, mod))
+          continue;
+        if ((type == module_type::dma) && !tile.active_memory)
+          continue;
+        if ((type == module_type::core) && !tile.active_core) {
+          if (metadata->getPairModuleIndex(metricSet, type) < 0)
+            continue;
+        }
+
+        auto loc = XAie_TileLoc(col, row);
+
+        auto startEvents = (type == module_type::core) ? coreStartEvents[metricSet]
+                         : ((type == module_type::dma) ? memoryStartEvents[metricSet]
+                         : ((type == module_type::shim) ? shimStartEvents[metricSet]
+                         : memTileStartEvents[metricSet]));
+        auto endEvents   = (type == module_type::core) ? coreEndEvents[metricSet]
+                         : ((type == module_type::dma) ? memoryEndEvents[metricSet]
+                         : ((type == module_type::shim) ? shimEndEvents[metricSet]
+                         : memTileEndEvents[metricSet]));
+
+        auto iter0 = configChannel0.find(tile);
+        auto iter1 = configChannel1.find(tile);
+        uint8_t channel0 = (iter0 == configChannel0.end()) ? 0 : iter0->second;
+        uint8_t channel1 = (iter1 == configChannel1.end()) ? 1 : iter1->second;
+
+        aie::profile::modifyEvents(type, subtype, channel0, startEvents, hwGen);
+        endEvents = startEvents;
+
+        aie::profile::configEventSelections(aieDevInst, loc, type, metricSet, channel0);
+
+        uint8_t numFreeCtr = static_cast<uint8_t>(startEvents.size());
+        int numCounters = 0;
+
+        for (uint8_t i = 0; i < numFreeCtr; ++i) {
+          auto startEvent = startEvents.at(i);
+          auto endEvent   = endEvents.at(i);
+
+          // Configure group event before setting counter
+          aie::profile::configGroupEvents(aieDevInst, loc, mod, type, metricSet, startEvent, channel0);
+
+          // Raw XAie_* counter setup — calls are recorded to the control-code ASM file
+          auto RC = XAie_PerfCounterReset(aieDevInst, loc, mod, i);
+          if (RC != XAIE_OK) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                "AIE Profile XDNA: PerfCounterReset failed.");
+            break;
+          }
+          RC = XAie_PerfCounterControlSet(aieDevInst, loc, mod, i, startEvent, endEvent);
+          if (RC != XAIE_OK) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                "AIE Profile XDNA: PerfCounterControlSet failed.");
+            break;
+          }
+
+          // Convert logical event IDs to physical IDs for reporting
+          uint16_t tmpStart = 0, tmpEnd = 0;
+          XAie_EventLogicalToPhysicalConv(aieDevInst, loc, mod, startEvent, &tmpStart);
+          XAie_EventLogicalToPhysicalConv(aieDevInst, loc, mod, endEvent,   &tmpEnd);
+          uint16_t phyStartEvent = tmpStart + aie::profile::getCounterBase(type);
+          uint16_t phyEndEvent   = tmpEnd   + aie::profile::getCounterBase(type);
+
+          uint64_t payload = getCounterPayload(aieDevInst, tileMetric.first, type, col, row,
+                                               startEvent, metricSet, channel0,
+                                               static_cast<uint8_t>(i));
+
+          std::string counterName = "AIE Counter " + std::to_string(counterId);
+          (db->getStaticInfo()).addAIECounter(deviceId, counterId, col, row, i,
+              phyStartEvent, phyEndEvent, 0 /*resetEvent*/, payload,
+              metadata->getClockFreqMhz(), metadata->getModuleName(module), counterName);
+
+          // Record hardware register address for the poll ELF (XAie_SaveRegister)
+          auto tileOffset = XAie_GetTileAddr(aieDevInst, row, col);
+          if (regValues.count(type) && i < regValues.at(type).size())
+            op_profile_data.emplace_back((u32)(regValues.at(type).at(i) + tileOffset));
+
+          // Record counter metadata for poll() db writes
+          std::vector<uint64_t> vals;
+          vals.insert(vals.end(), {col, aie::getRelativeRow(row, metadata->getAIETileRowOffset()),
+                                   phyStartEvent, phyEndEvent, 0, 0, 0, payload});
+          outputValues.push_back(vals);
+
+          counterId++;
+          numCounters++;
+        } // numFreeCtr
+
+        std::stringstream msg;
+        msg << "Reserved " << numCounters << " counters for profiling AIE tile ("
+            << +col << "," << +row << ") using metric set " << metricSet << ".";
+        xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+        numTileCounters[numCounters]++;
+      } // configMetrics
+
+      // Report counters reserved per tile
+      {
+        std::stringstream msg;
+        msg << "AIE profile counters reserved in " << metadata->getModuleName(module) << " - ";
+        for (int n = 0; n <= metadata->getNumCountersMod(module); ++n) {
+          if (numTileCounters[n] == 0)
+            continue;
+          msg << n << ": " << numTileCounters[n] << " tiles, ";
+          (db->getStaticInfo()).addAIECounterResources(deviceId, n, numTileCounters[n], module);
+        }
+        xrt_core::message::send(severity_level::info, "XRT",
+            msg.str().substr(0, msg.str().size()-2));
+      }
+
+      runtimeCounters = true;
+    } // modules
+
+    return runtimeCounters;
+#endif // XDP_VE2_ZOCL_BUILD
   }
+
+#ifndef XDP_VE2_ZOCL_BUILD
+  /****************************************************************************
+   * Generate and submit a poll ELF that reads hardware counter registers and
+   * saves values into resultBO, mirroring the NPU3 generatePollElf() pattern.
+   * Each XAie_SaveRegister(aieDevInst, addr, idx) call records a "read register
+   * addr, write to output slot idx" instruction into the ASM/ELF.
+   ***************************************************************************/
+  void AieProfile_VE2Impl::generatePollElf()
+  {
+    auto context = metadata->getHwContext();
+    std::string tranxName = "AieProfilePoll";
+
+    if (!tranxHandler->initializeTransaction(aieDevInst, tranxName)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Unable to initialize poll transaction.");
+      return;
+    }
+
+    for (u32 i = 0; i < op_profile_data.size(); i++)
+      XAie_SaveRegister(aieDevInst, op_profile_data[i], i);
+
+    if (!tranxHandler->submitTransaction(aieDevInst, context)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to submit poll transaction ELF.");
+      return;
+    }
+    xrt_core::message::send(severity_level::debug, "XRT",
+        "AIE Profile: Poll ELF submitted successfully.");
+  }
+#endif // !XDP_VE2_ZOCL_BUILD
 
   void AieProfile_VE2Impl::startPoll(const uint64_t id)
   {
@@ -611,6 +874,7 @@ namespace xdp {
     if (!(db->getStaticInfo().isDeviceReady(id)))
       return;
 
+#ifdef XDP_VE2_ZOCL_BUILD
     if (!aieDevInst)
       return;
 
@@ -725,6 +989,25 @@ namespace xdp {
         db->getDynamicInfo().addAIESample(id, timestamp, values);
       }
     }
+#else // !XDP_VE2_ZOCL_BUILD — XDNA path: read counter values from the poll ELF result BO
+    if (finishedPoll || op_profile_data.empty())
+      return;
+
+    resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    uint32_t* output = resultBO.map<uint32_t*>();
+
+    double timestamp = xrt_core::time_ns() / 1.0e6;
+
+    // output layout: [addr, value] pairs — output[2*i] = address, output[2*i+1] = counter value
+    for (u32 i = 0; i < op_profile_data.size(); i++) {
+      if (i >= outputValues.size())
+        break;
+      std::vector<uint64_t> values = outputValues[i];
+      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
+      db->getDynamicInfo().addAIESample(id, timestamp, values);
+    }
+    finishedPoll = true;
+#endif // XDP_VE2_ZOCL_BUILD
   }
 
   void AieProfile_VE2Impl::endPoll()
@@ -742,6 +1025,7 @@ namespace xdp {
 
   void AieProfile_VE2Impl::freeResources() 
   {
+#ifdef XDP_VE2_ZOCL_BUILD
     displayAdfAPIResults();
     for (auto& c : perfCounters){
       c->stop();
@@ -762,8 +1046,10 @@ namespace xdp {
       bc->stop();
       bc->release();
     }
+#endif // XDP_VE2_ZOCL_BUILD
   }
 
+#ifdef XDP_VE2_ZOCL_BUILD
   /****************************************************************************
    * Display start to bytes or latency results to output transcript
    ***************************************************************************/
@@ -798,5 +1084,6 @@ namespace xdp {
       }
     }
   }
+#endif // XDP_VE2_ZOCL_BUILD
 
   }

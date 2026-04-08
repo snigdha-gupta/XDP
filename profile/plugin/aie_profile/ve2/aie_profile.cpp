@@ -672,7 +672,8 @@ namespace xdp {
     auto hwGen = metadata->getHardwareGen();
     auto configChannel0 = metadata->getConfigChannel0();
     auto configChannel1 = metadata->getConfigChannel1();
-    uint8_t startColShift = 0;  // NPU3 pattern: use 0 for XDNA
+    uint8_t startColShift = metadata->getPartitionOverlayStartCols().front();
+    aie::displayColShiftInfo(startColShift);
 
     // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF
     static const std::map<module_type, std::vector<uint64_t>> regValues = {

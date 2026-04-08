@@ -218,12 +218,14 @@ namespace xdp {
       {0}  // PartProp
     };
 
-    auto RC = XAie_CfgInitialize(&xdnaAieDevInst, &cfg);
-    if (RC != XAIE_OK) {
-      xrt_core::message::send(severity_level::warning, "XRT",
-          "AIE Profile: XAie_CfgInitialize failed. Cannot configure AIE profiling.");
-      return;
-    }
+    // XAie_CfgInitialize populates geometry fields (col/row shifts, base address)
+    // before attempting to init the IO backend. On XDNA Linux the default Linux IO
+    // backend will fail here because the AIE partition is managed by the XDNA
+    // driver, not the Linux AIE character device. This is expected — the geometry
+    // is still correctly set up. initializeTransaction() below will switch the
+    // backend to control-code (which records XAie_* calls to ASM without touching
+    // hardware) via XAie_SetIOBackend before opening the ASM file.
+    XAie_CfgInitialize(&xdnaAieDevInst, &cfg);
     aieDevInst = &xdnaAieDevInst;
 
     if (!tranxHandler->initializeTransaction(aieDevInst, "AieProfileMetrics"))

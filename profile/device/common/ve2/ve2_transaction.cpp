@@ -34,8 +34,11 @@ namespace xdp::aie {
             "Writing to New Control Code ASM file: " + getAsmFileName());
 
         try {
-            // NOTE: XAIE_IO_BACKEND_CONTROLCODE is the default
-            // XAie_SetIOBackend(aieDevInst, XAIE_IO_BACKEND_CONTROLCODE);
+            // On VE2 Linux, the default IO backend is Linux IO which tries to open
+            // the AIE character device — this fails on XDNA (PCIe NPU) since the
+            // AIE is managed by the XDNA driver, not the Linux AIE driver.
+            // Explicitly switch to control-code backend before opening the ASM file.
+            XAie_SetIOBackend(aieDevInst, XAIE_IO_BACKEND_CONTROLCODE);
             XAie_OpenControlCodeFile(aieDevInst, getAsmFileName().c_str(), 8192);
             XAie_StartNewJob(aieDevInst, XAIE_START_JOB);
             return true;

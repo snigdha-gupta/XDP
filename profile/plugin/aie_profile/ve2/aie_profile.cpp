@@ -244,7 +244,10 @@ namespace xdp {
       // Create result buffer to receive counter values from the poll ELF
       constexpr uint32_t resultBOSize = 0x20000;
       try {
-        resultBO = xrt_core::bo_int::create_debug_bo(hwContext, resultBOSize);
+        std::map<uint32_t, size_t> activeUCsegmentMap;
+        activeUCsegmentMap[0] = resultBOSize;
+        resultBO = xrt_core::bo_int::create_bo(hwContext, resultBOSize, xrt_core::bo_int::use_type::uc_debug);
+        xrt_core::bo_int::config_bo(resultBO, activeUCsegmentMap);
         uint32_t* output = resultBO.map<uint32_t*>();
         memset(output, 0, resultBOSize);
         xrt_core::message::send(severity_level::debug, "XRT",

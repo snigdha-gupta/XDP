@@ -30,10 +30,7 @@ namespace xdp {
   
   class AieProfile_VE2Impl : public AieProfileImpl{
     public:
-      // AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata)
-      //   : AieProfileImpl(database, metadata){}
       AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID);
-
       ~AieProfile_VE2Impl() = default;
 
       void updateDevice();
@@ -91,11 +88,7 @@ namespace xdp {
         return pc;
       }
 
-      std::pair<int, XAie_Events>
-      getShimBroadcastChannel(const tile_type& srcTile);
-#endif
-
-#ifdef XDP_VE2_ZOCL_BUILD
+      std::pair<int, XAie_Events> getShimBroadcastChannel(const tile_type& srcTile);
       void displayAdfAPIResults();
 #else
       void generatePollElf();
@@ -142,6 +135,18 @@ namespace xdp {
 #endif
 
 #ifndef XDP_VE2_ZOCL_BUILD
+      // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF.
+      static const std::map<module_type, std::vector<uint64_t>> regValues = {
+            {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
+                                     aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
+            {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,
+                                     aie2ps::mm_performance_counter2,   aie2ps::mm_performance_counter3}},
+            {module_type::shim,     {aie2ps::shim_performance_counter0, aie2ps::shim_performance_counter1,
+                                     aie2ps::shim_performance_counter2, aie2ps::shim_performance_counter3}},
+            {module_type::mem_tile, {aie2ps::mem_performance_counter0,  aie2ps::mem_performance_counter1,
+                                     aie2ps::mem_performance_counter2,  aie2ps::mem_performance_counter3}}
+      };
+
       std::unique_ptr<aie::VE2Transaction> tranxHandler;
       std::vector<u32> op_profile_data;
       std::vector<std::vector<uint64_t>> outputValues;

@@ -217,7 +217,7 @@ namespace xdp {
 
     if (runtimeCounters) {
       auto hwContext = metadata->getHwContext();
-      if (!tranxHandler->submitTransaction(&xdnaAieDevInst, hwContext);) {
+      if (!tranxHandler->submitTransaction(&xdnaAieDevInst, hwContext)) {
         xrt_core::message::send(severity_level::warning, "XRT",
             "AIE Profile: Failed to submit config transaction ELF.");
         return;
@@ -750,8 +750,8 @@ namespace xdp {
 
           // Configure group event before setting counter
           aie::profile::configGroupEvents(&xdnaAieDevInst, loc, mod, type, metricSet, startEvent, channel0);
-          if (aie::isStreamSwitchPortEvent(startEvent))
-            configStreamSwitchPorts(tileMetric.first, loc, type, metricSet, channel0, startEvent);
+          
+          // Stream switch port configuration uses FAL and is ZOCL-only — not applicable for XDNA.
 
           // Convert logical event IDs to physical IDs for reporting
           uint16_t tmpStart = 0, tmpEnd = 0;
@@ -777,7 +777,7 @@ namespace xdp {
 
           // Record counter metadata for poll() db writes
           std::vector<uint64_t> vals;
-          vals.insert(vals.end(), {col, aie::getRelativeRow(row, metadata->getAIETileRowOffset()),
+          vals.insert(vals.end(), {static_cast<uint8_t>(col), aie::getRelativeRow(row, metadata->getAIETileRowOffset()),
                                    phyStartEvent, phyEndEvent, resetEvent, 0, 0, payload});
           outputValues.push_back(vals);
 
@@ -834,7 +834,7 @@ namespace xdp {
     for (u32 i = 0; i < op_profile_data.size(); i++)
       XAie_SaveRegister(&xdnaAieDevInst, op_profile_data[i], i);
 
-    if (!tranxHandler->submitTransaction(&xdnaA ieDevInst, context)) {
+    if (!tranxHandler->submitTransaction(&xdnaAieDevInst, context)) {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: Failed to submit poll transaction ELF.");
       return;

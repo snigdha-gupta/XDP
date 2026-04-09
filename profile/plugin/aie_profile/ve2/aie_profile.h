@@ -11,6 +11,7 @@
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
 #ifndef XDP_VE2_ZOCL_BUILD
 #include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
 #include "xrt/xrt_bo.h"
 #endif
 #include "xaiefal/xaiefal.hpp"

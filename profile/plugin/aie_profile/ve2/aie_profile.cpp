@@ -34,7 +34,6 @@
 #include "shim_ve2/xdna_hwctx.h"
 #ifndef XDP_VE2_ZOCL_BUILD
 #include "core/common/api/bo_int.h"
-#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
 #endif
 
 #ifdef XDP_VE2_ZOCL_BUILD

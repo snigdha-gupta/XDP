@@ -137,7 +137,7 @@ namespace xdp {
 
 #ifndef XDP_VE2_ZOCL_BUILD
       // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF.
-      static const std::map<module_type, std::vector<uint64_t>> regValues = {
+      const std::map<module_type, std::vector<uint64_t>> regValues {
             {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
                                      aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
             {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,

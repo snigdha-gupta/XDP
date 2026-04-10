@@ -89,10 +89,13 @@ else()
     add_library(xdp_aie_profile_plugin_xdna SHARED ${AIE_PROFILE_PLUGIN_FILES} ${AIE_PROFILE_IMPL_FILES} ${AIE_PROFILE_UTIL_FILES} ${AIE_PROFILE_CONFIG_FILES} ${AIE_JSON_PARSER_FILES} "${PROFILE_DIR}/device/common/ve2/ve2_transaction.cpp")
     add_dependencies(xdp_aie_profile_plugin_xdna xdp_core xrt_coreutil)
     target_link_libraries(xdp_aie_profile_plugin_xdna PRIVATE xdp_core xrt_coreutil aie_codegen aiebu_library_objects)
-    # -Bsymbolic-functions: ensures XAie_* calls within this plugin resolve to the
-    # statically-linked aie_codegen (compiled with __AIECONTROLCODE__) rather than
-    # being interposed by the system libxaiengine.so.3 (Linux IO backend only).
-    target_link_options(xdp_aie_profile_plugin_xdna PRIVATE -Wl,-Bsymbolic-functions)
+    # -Bsymbolic: ensures XAie_* calls AND data symbols (e.g. ControlCodeBackend)
+    # within this plugin resolve to the statically-linked aie_codegen
+    # (compiled with __AIECONTROLCODE__) rather than being interposed by the
+    # system libxaiengine.so.3 (Linux IO backend only).
+    # -Bsymbolic-functions alone is insufficient because ControlCodeBackend is a
+    # data symbol, and IOBackend[] references it via relocation at load time.
+    target_link_options(xdp_aie_profile_plugin_xdna PRIVATE -Wl,-Bsymbolic)
     target_compile_definitions(xdp_aie_profile_plugin_xdna PRIVATE XDP_VE2_BUILD=1 XDP_USE_AIE_CODEGEN=1 FAL_LINUX="on")
     target_include_directories(xdp_aie_profile_plugin_xdna PRIVATE ${CMAKE_SOURCE_DIR}/src ${AIEFAL_DIR} ${AIEBU_SOURCE_DIR}/src/cpp/include)
     set_target_properties(xdp_aie_profile_plugin_xdna PROPERTIES VERSION ${XRT_VERSION_STRING} SOVERSION ${XRT_SOVERSION})

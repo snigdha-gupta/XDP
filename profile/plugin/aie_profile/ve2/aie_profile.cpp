@@ -213,6 +213,15 @@ namespace xdp {
 #else
     // XDNA path: locally initialize XAie_DevInst, record XAie_* calls to ASM via
     // control-code backend, then assemble to ELF and submit.
+
+    // // Submit nop.elf first to prime CERT before any subsequent ELF submissions.
+    // // This mirrors the ZOCL path and XDP_aie4's ve2/trace offload pattern.
+    // if (!aie::submitNopElf(metadata->getHandle())) {
+    //   xrt_core::message::send(severity_level::warning, "XRT",
+    //       "AIE Profile: Failed to submit nop.elf. AIE profile configuration will not proceed.");
+    //   return;
+    // }
+
     bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
 
     if (runtimeCounters) {
@@ -225,8 +234,16 @@ namespace xdp {
       xrt_core::message::send(severity_level::info, "XRT",
           "AIE Profile: Successfully configured AIE profiling via XDNA asm->elf transaction.");
 
-      // Generate and submit the poll ELF (reads counter registers → resultBO)
-      generatePollElf();
+      // Pre-generate the poll ELF NOW (on main thread, before app starts).
+      // aiebu is only safe to call here — NOT from the polling thread or destructor.
+      // submitPollElf() (called from continuePoll after app completes) only uses
+      // XRT APIs to submit the already-generated ELF file.
+      if (!op_profile_data.empty()) {
+        if (!preparePollElf()) {
+          xrt_core::message::send(severity_level::warning, "XRT",
+              "AIE Profile: Failed to prepare poll ELF. Counter values will not be collected.");
+        }
+      }
     } else {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: No runtime counters configured for XDNA path.");
@@ -815,32 +832,72 @@ namespace xdp {
 
 #ifndef XDP_VE2_ZOCL_BUILD
   /****************************************************************************
-   * Generate and submit a poll ELF that reads hardware counter registers and
-   * saves values into resultBO, mirroring the NPU3 generatePollElf() pattern.
-   * Each XAie_SaveRegister(aieDevInst, addr, idx) call records a "read register
-   * addr, write to output slot idx" instruction into the ASM/ELF.
+   * preparePollElf(): generate poll ASM + convert to ELF (no submission).
+   *
+   * MUST be called on the main thread (from updateDevice()), NOT from the
+   * polling thread or a destructor. aiebu (invoked by generateELF()) uses
+   * boost regex and global streams that are unsafe to call from a destructor
+   * or after program teardown has begun.
+   *
+   * The resulting ELF file is written to disk. submitPollElf() reads it
+   * and submits to CERT — that step is safe from any thread.
    ***************************************************************************/
-  void AieProfile_VE2Impl::generatePollElf()
+  bool AieProfile_VE2Impl::preparePollElf()
   {
-    auto context = metadata->getHwContext();
     std::string tranxName = "AieProfilePoll";
 
     if (!tranxHandler->initializeTransaction(&xdnaAieDevInst, tranxName)) {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: Unable to initialize poll transaction.");
-      return;
+      return false;
     }
 
     for (u32 i = 0; i < op_profile_data.size(); i++)
       XAie_SaveRegister(&xdnaAieDevInst, op_profile_data[i], i);
 
-    if (!tranxHandler->submitTransaction(&xdnaAieDevInst, context)) {
+    // Close the ASM file and convert to ELF — aiebu is called here.
+    if (!tranxHandler->completeASM(&xdnaAieDevInst)) {
       xrt_core::message::send(severity_level::warning, "XRT",
-          "AIE Profile: Failed to submit poll transaction ELF.");
+          "AIE Profile: Failed to finalize poll ASM.");
+      return false;
+    }
+    if (!tranxHandler->generateELF()) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to generate poll ELF.");
+      return false;
+    }
+    xrt_core::message::send(severity_level::debug, "XRT",
+        "AIE Profile: Poll ELF prepared (not yet submitted).");
+    return true;
+  }
+
+  /****************************************************************************
+   * submitPollElf(): submit the pre-generated poll ELF to CERT and read back
+   * the counter values from resultBO.
+   *
+   * Safe to call from the polling thread — uses only XRT API (xrt::elf,
+   * xrt::module, xrt::run), no aiebu/boost/streams.
+   ***************************************************************************/
+  void AieProfile_VE2Impl::submitPollElf(const uint64_t id)
+  {
+    auto hwContext = metadata->getHwContext();
+    if (!tranxHandler->submitELF(hwContext)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to submit poll ELF.");
       return;
     }
     xrt_core::message::send(severity_level::debug, "XRT",
         "AIE Profile: Poll ELF submitted successfully.");
+
+    resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    uint32_t* output = resultBO.map<uint32_t*>();
+    double timestamp = xrt_core::time_ns() / 1.0e6;
+
+    for (u32 i = 0; i < op_profile_data.size(); i++) {
+      std::vector<uint64_t> values = outputValues[i];
+      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
+      db->getDynamicInfo().addAIESample(id, timestamp, values);
+    }
   }
 #endif // !XDP_VE2_ZOCL_BUILD
 
@@ -860,6 +917,15 @@ namespace xdp {
       poll(id);
       std::this_thread::sleep_for(std::chrono::microseconds(metadata->getPollingIntervalVal()));
     }
+
+#ifndef XDP_VE2_ZOCL_BUILD
+    // XDNA one-shot end-of-run: threadCtrl is now false meaning the application has completed.
+    // The poll ELF was already generated (ASM+ELF via aiebu) during updateDevice() on the main
+    // thread. Here we only submit it — no aiebu, safe from within the polling thread.
+    if (!op_profile_data.empty())
+      submitPollElf(id);
+#endif
+
     //Final Polling Operation
     poll(id);
   }
@@ -985,22 +1051,10 @@ namespace xdp {
         db->getDynamicInfo().addAIESample(id, timestamp, values);
       }
     }
-#else // !XDP_VE2_ZOCL_BUILD — XDNA path: read counter values from the poll ELF result BO
-    if (finishedPoll || op_profile_data.empty())
-      return;
-
-    resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    uint32_t* output = resultBO.map<uint32_t*>();
-
-    double timestamp = xrt_core::time_ns() / 1.0e6;
-
-    // output layout: [addr, value] pairs — output[2*i] = address, output[2*i+1] = counter value
-    for (u32 i = 0; i < op_profile_data.size(); i++) {
-      std::vector<uint64_t> values = outputValues[i];
-      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
-      db->getDynamicInfo().addAIESample(id, timestamp, values);
-    }
-    finishedPoll = true;
+#else // XDNA path: data is collected at end-of-run in freeResources() after application completes.
+    // poll() is intentionally a no-op here — the CERT model is one-shot end-of-run,
+    // so counter values are only meaningful after the application ELF has finished.
+    return;
 #endif // XDP_VE2_ZOCL_BUILD
   }
 
@@ -1041,6 +1095,10 @@ namespace xdp {
       bc->release();
     }
 #endif // XDP_VE2_ZOCL_BUILD
+    // XDNA: poll ELF is submitted and resultBO is read in continuePoll() (inside the live
+    // polling thread), NOT here in freeResources() which is called from the plugin destructor.
+    // Calling aiebu from a destructor during program exit causes a segfault because C++
+    // global streams that aiebu uses internally may already have been destroyed.
   }
 
 #ifdef XDP_VE2_ZOCL_BUILD

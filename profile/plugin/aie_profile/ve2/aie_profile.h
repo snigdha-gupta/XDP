@@ -92,7 +92,10 @@ namespace xdp {
       std::pair<int, XAie_Events> getShimBroadcastChannel(const tile_type& srcTile);
       void displayAdfAPIResults();
 #else
-      void generatePollElf();
+      // preparePollElf(): generate ASM + ELF via aiebu — call ONLY from main thread.
+      bool preparePollElf();
+      // submitPollElf(): submit pre-generated ELF to CERT, read resultBO — safe from any thread.
+      void submitPollElf(const uint64_t id);
 #endif
 
     private:
@@ -152,7 +155,6 @@ namespace xdp {
       std::vector<u32> op_profile_data;
       std::vector<std::vector<uint64_t>> outputValues;
       xrt::bo resultBO;
-      bool finishedPoll = false;
 #endif
   };
 }   

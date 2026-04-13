@@ -103,7 +103,7 @@ namespace xdp::aie {
             }
 
             //Convert ASM to ELF data.
-            auto as = aiebu::aiebu_assembler(aiebu::aiebu_assembler::buffer_type::asm_aie4,
+            auto as = aiebu::aiebu_assembler(aiebu::aiebu_assembler::buffer_type::asm_aie2ps,
                                              control_code_buf, std::vector<std::string>{}, libpaths);
             
             //Write elf data to a file

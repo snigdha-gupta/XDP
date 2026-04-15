@@ -102,16 +102,32 @@ namespace xdp {
 #ifndef XDP_VE2_ZOCL_BUILD
     tranxHandler = std::make_unique<aie::VE2Transaction>();
 
-    // Create debug buffer for AIE Profile results
+    // Create debug buffer for AIE Profile results.
+    // Each CERT microcontroller (one per column) needs its own segment in resultBO
+    // for SAVE_REGISTER DMA output. Map all active columns, splitting the buffer evenly.
     auto context = metadata->getHwContext();
     uint32_t* output = nullptr;
+    xdp::aie::driver_config meta_cfg = metadata->getAIEConfigMetadata();
+    uint32_t numCols = meta_cfg.num_columns;
+    if (numCols == 0)
+      numCols = 1;
+    constexpr size_t totalBufSz = 0x20000; // 128KB
+    size_t segmentSz = totalBufSz / numCols;
+
     std::map<uint32_t, size_t> activeUCsegmentMap;
-    activeUCsegmentMap[0] = 0x20000;
+    for (uint32_t col = 0; col < numCols; col++)
+      activeUCsegmentMap[col] = segmentSz;
+
     try {
-      resultBO = xrt_core::bo_int::create_bo(context, 0x20000, xrt_core::bo_int::use_type::uc_debug);
+      resultBO = xrt_core::bo_int::create_bo(context, totalBufSz, xrt_core::bo_int::use_type::uc_debug);
       xrt_core::bo_int::config_bo(resultBO, activeUCsegmentMap);
       output = resultBO.map<uint32_t*>();
-      memset(output, 0, 0x20000);
+      memset(output, 0, totalBufSz);
+
+      std::stringstream msg;
+      msg << "AIE Profile: resultBO configured with " << numCols
+          << " column segments, each " << segmentSz << " bytes.";
+      xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", msg.str());
     } catch (std::exception& e) {
       std::stringstream msg;
       msg << "Unable to create 128KB buffer for AIE Profile results. Cannot get AIE Profile info. " << e.what() << std::endl;
@@ -1078,6 +1094,20 @@ namespace xdp {
     resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     uint32_t* output = resultBO.map<uint32_t*>();
     double timestamp = xrt_core::time_ns() / 1.0e6;
+
+    // Raw dump of resultBO after poll ELF execution (post-app).
+    // Dump enough words to cover several slots under both 1-word and 2-word layouts.
+    {
+      u32 numSlots = static_cast<u32>(op_profile_data.size());
+      u32 dumpWords = std::min(numSlots * 3u, 64u);
+      std::stringstream dump;
+      dump << "AIE Profile resultBO raw dump (" << dumpWords << " words, "
+           << numSlots << " slots):";
+      for (u32 w = 0; w < dumpWords; w++)
+        dump << "\n  output[" << w << "] = " << output[w]
+             << " (0x" << std::hex << output[w] << std::dec << ")";
+      xrt_core::message::send(severity_level::debug, "XRT", dump.str());
+    }
 
     for (u32 i = 0; i < op_profile_data.size(); i++) {
       std::vector<uint64_t> values = outputValues[i];

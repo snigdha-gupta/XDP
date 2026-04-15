@@ -921,7 +921,7 @@ namespace xdp {
         }
         catch (...) {
           std::stringstream msg;
-          msg << "Channel specifications in graph_based_interface_metrics "
+          msg << "Channel specifications in graph_based_interface_tile_metrics "
               << "are not valid and hence ignored.";
           xrt_core::message::send(severity_level::warning, "XRT", msg.str());
         }
@@ -1083,6 +1083,9 @@ namespace xdp {
       }
       catch (std::invalid_argument const&) {
         // maxColumn is not an integer i.e either 1st style or wrong format, skip for now
+        xrt_core::message::send(severity_level::warning, "XRT",
+                                "tile_based_interface_tile_metrics: invalid range line. Ignored: "
+                                + metricsSettings[i]);
         continue;
       }
 
@@ -1149,6 +1152,10 @@ namespace xdp {
 
       try {
         col = aie::convertStringToUint8(metrics[i][1]);
+        xrt_core::message::send(severity_level::warning, "XRT",
+                                "tile_based_interface_tile_metrics: invalid format. Ignored: "
+                                + metricsSettings[i]);
+        continue;
       }
       catch (std::invalid_argument const&) {
         // max column is not a number, so the expected single column specification. Handle this here

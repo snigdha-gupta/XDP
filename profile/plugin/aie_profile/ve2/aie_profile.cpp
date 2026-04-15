@@ -852,8 +852,49 @@ namespace xdp {
       return false;
     }
 
+    // Slots 0..N-1: one per performance counter register.
     for (u32 i = 0; i < op_profile_data.size(); i++)
       XAie_SaveRegister(&xdnaAieDevInst, op_profile_data[i], i);
+
+    // Slots N, N+1, N+2, N+3, ...: timer_low + timer_high per unique tile.
+    // We emit exactly one pair per tile regardless of how many counters it has,
+    // so the polling thread can reconstruct the full 64-bit hardware timer value.
+    u32 timerSlot = static_cast<u32>(op_profile_data.size());
+    tileTimerSlotMap.clear();
+    int rowOffset = metadata->getAIETileRowOffset();
+    for (u32 i = 0; i < outputValues.size(); i++) {
+      int col    = static_cast<int>(outputValues[i][0]);
+      int relRow = static_cast<int>(outputValues[i][1]);
+      int absRow = relRow + rowOffset;
+      auto key   = std::make_pair(col, absRow);
+
+      if (tileTimerSlotMap.count(key))
+        continue;  // already emitted for this tile
+
+      tileTimerSlotMap[key] = timerSlot;
+
+      auto moduleType  = aie::getModuleType(absRow, rowOffset);
+      auto tileOffset  = XAie_GetTileAddr(&xdnaAieDevInst, absRow, col);
+
+      uint64_t timerLow, timerHigh;
+      if (moduleType == module_type::core) {
+        timerLow  = aie2ps::cm_timer_low;
+        timerHigh = aie2ps::cm_timer_high;
+      } else if (moduleType == module_type::shim) {
+        timerLow  = aie2ps::shim_timer_low;
+        timerHigh = aie2ps::shim_timer_high;
+      } else if (moduleType == module_type::mem_tile) {
+        timerLow  = aie2ps::mem_timer_low;
+        timerHigh = aie2ps::mem_timer_high;
+      } else {
+        timerLow  = aie2ps::mm_timer_low;
+        timerHigh = aie2ps::mm_timer_high;
+      }
+
+      XAie_SaveRegister(&xdnaAieDevInst, static_cast<u32>(timerLow  + tileOffset), timerSlot);
+      XAie_SaveRegister(&xdnaAieDevInst, static_cast<u32>(timerHigh + tileOffset), timerSlot + 1);
+      timerSlot += 2;
+    }
 
     // Close the ASM file and convert to ELF — aiebu is called here.
     if (!tranxHandler->completeASM(&xdnaAieDevInst)) {
@@ -892,10 +933,29 @@ namespace xdp {
     resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     uint32_t* output = resultBO.map<uint32_t*>();
     double timestamp = xrt_core::time_ns() / 1.0e6;
+    int rowOffset = metadata->getAIETileRowOffset();
 
     for (u32 i = 0; i < op_profile_data.size(); i++) {
       std::vector<uint64_t> values = outputValues[i];
+
+      // values[5]: counter value — SAVE_REGISTER stores {addr, value} per slot,
+      // so slot i lives at output[2*i] (addr) and output[2*i+1] (value).
       values[5] = static_cast<uint64_t>(output[2 * i + 1]);
+
+      // values[6]: 64-bit hardware timer for this tile.
+      // timer_low is at tileTimerSlotMap[tile], timer_high at that slot + 1.
+      int col    = static_cast<int>(values[0]);
+      int relRow = static_cast<int>(values[1]);
+      int absRow = relRow + rowOffset;
+      auto key   = std::make_pair(col, absRow);
+      auto it    = tileTimerSlotMap.find(key);
+      if (it != tileTimerSlotMap.end()) {
+        u32 timerSlot    = it->second;
+        uint64_t timerLo = output[2 * timerSlot + 1];
+        uint64_t timerHi = output[2 * (timerSlot + 1) + 1];
+        values[6] = (timerHi << 32) | timerLo;
+      }
+
       db->getDynamicInfo().addAIESample(id, timestamp, values);
     }
   }

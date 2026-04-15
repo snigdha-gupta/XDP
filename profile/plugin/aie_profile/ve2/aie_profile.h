@@ -155,6 +155,10 @@ namespace xdp {
       std::vector<u32> op_profile_data;
       std::vector<std::vector<uint64_t>> outputValues;
       xrt::bo resultBO;
+      // Maps (col, absolute_row) -> base slot index in resultBO for this tile's
+      // timer registers (timer_low at slot N, timer_high at slot N+1).
+      // Populated in preparePollElf(), consumed in submitPollElf().
+      std::map<std::pair<int,int>, u32> tileTimerSlotMap;
 #endif
   };
 }   

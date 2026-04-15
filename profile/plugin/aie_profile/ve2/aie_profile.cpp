@@ -214,6 +214,7 @@ namespace xdp {
     // XDNA path: locally initialize XAie_DevInst, record XAie_* calls to ASM via
     // control-code backend, then assemble to ELF and submit.
 
+    // TODO: is this needed?
     // // Submit nop.elf first to prime CERT before any subsequent ELF submissions.
     // // This mirrors the ZOCL path and XDP_aie4's ve2/trace offload pattern.
     // if (!aie::submitNopElf(metadata->getHandle())) {
@@ -234,16 +235,11 @@ namespace xdp {
       xrt_core::message::send(severity_level::info, "XRT",
           "AIE Profile: Successfully configured AIE profiling via XDNA asm->elf transaction.");
 
-      // Pre-generate the poll ELF NOW (on main thread, before app starts).
-      // aiebu is only safe to call here — NOT from the polling thread or destructor.
-      // submitPollElf() (called from continuePoll after app completes) only uses
-      // XRT APIs to submit the already-generated ELF file.
-      if (!op_profile_data.empty()) {
-        if (!preparePollElf()) {
-          xrt_core::message::send(severity_level::warning, "XRT",
-              "AIE Profile: Failed to prepare poll ELF. Counter values will not be collected.");
-        }
-      }
+      // Generate + submit the poll ELF now (like NPU3).
+      // The poll ELF queues SAVE_REGISTER instructions on CERT. The actual counter
+      // values are read from resultBO later in poll() at teardown.
+      if (!op_profile_data.empty())
+        generatePollElf();
     } else {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: No runtime counters configured for XDNA path.");
@@ -391,6 +387,61 @@ namespace xdp {
 
     xrt_core::message::send(severity_level::info, "XRT", msg.str());
   }
+
+  // Configure stream switch monitor ports for XDNA path.
+  // Mirrors NPU3's approach: uses XAie_EventSelectStrmPort() directly on the ControlCode
+  // DevInst (no FAL). The call is recorded to the config ASM and executed by CERT on hardware.
+  // Only called when isStreamSwitchPortEvent(startEvent) is true.
+#ifndef XDP_VE2_ZOCL_BUILD
+  void AieProfile_VE2Impl::configStreamSwitchPorts(const tile_type& tile,
+                                                    const XAie_LocType& loc,
+                                                    const module_type& type,
+                                                    const std::string& metricSet,
+                                                    const uint8_t channel,
+                                                    const XAie_Events startEvent)
+  {
+    uint8_t rscId   = 0;
+    uint8_t portnum = aie::getPortNumberFromEvent(startEvent);
+
+    if (type == module_type::core) {
+      auto slaveOrMaster = aie::isInputSet(type, metricSet) ? XAIE_STRMSW_SLAVE : XAIE_STRMSW_MASTER;
+      XAie_EventSelectStrmPort(&xdnaAieDevInst, loc, rscId, slaveOrMaster, DMA, channel);
+      std::stringstream msg;
+      msg << "AIE Profile XDNA: configured core tile "
+          << (aie::isInputSet(type, metricSet) ? "S2MM" : "MM2S")
+          << " stream switch port for metric set " << metricSet
+          << " channel " << (int)channel;
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+      return;
+    }
+
+    if (type == module_type::shim) {
+      if (portnum >= tile.stream_ids.size())
+        return;
+      auto slaveOrMaster = (tile.is_master_vec.at(portnum) == 0) ? XAIE_STRMSW_SLAVE : XAIE_STRMSW_MASTER;
+      uint8_t streamPortId = static_cast<uint8_t>(tile.stream_ids.at(portnum));
+      XAie_EventSelectStrmPort(&xdnaAieDevInst, loc, rscId, slaveOrMaster, SOUTH, streamPortId);
+      std::stringstream msg;
+      msg << "AIE Profile XDNA: configured shim tile "
+          << (aie::isInputSet(type, metricSet) ? "S2MM" : "MM2S")
+          << " stream switch port for metric set " << metricSet
+          << " stream port id " << (int)streamPortId;
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+      return;
+    }
+
+    if (type == module_type::mem_tile) {
+      auto slaveOrMaster = aie::isInputSet(type, metricSet) ? XAIE_STRMSW_SLAVE : XAIE_STRMSW_MASTER;
+      XAie_EventSelectStrmPort(&xdnaAieDevInst, loc, rscId, slaveOrMaster, DMA, channel);
+      std::stringstream msg;
+      msg << "AIE Profile XDNA: configured mem tile "
+          << (aie::isInputSet(type, metricSet) ? "S2MM" : "MM2S")
+          << " stream switch port for metric set " << metricSet
+          << " channel " << (int)channel;
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+    }
+  }
+#endif // !XDP_VE2_ZOCL_BUILD
 
   // Set metrics for all specified AIE counters on this device with configs given in AIE_profile_settings
   bool 
@@ -670,11 +721,6 @@ namespace xdp {
       {0}  // PartProp
     };
 
-    // The xdp_aie_profile_plugin_xdna plugin is linked with -Bsymbolic-functions,
-    // so all XAie_* calls resolve to the statically-linked aie_codegen (compiled
-    // with __AIECONTROLCODE__), NOT to the system libxaiengine.so.3 (Linux IO backend).
-    // aie_codegen's XAie_CfgInitialize defaults to the ControlCode backend, which
-    // records XAie_* calls to ASM without touching hardware — no Linux IO init attempted.
     auto RC = XAie_CfgInitialize(&xdnaAieDevInst, &cfg);
     if (RC != XAIE_OK) {
       xrt_core::message::send(severity_level::warning, "XRT", "AIE Profile: AIE Driver Initialization Failed during AIE Profiling.");
@@ -682,8 +728,7 @@ namespace xdp {
     }
 
     std::string tranxName = "AieProfileMetrics";
-    xrt_core::message::send(severity_level::info, "XRT",
-      "AIE Profile: Starting transaction " + tranxName + ".");
+    xrt_core::message::send(severity_level::info, "XRT", "AIE Profile: Starting transaction " + tranxName + ".");
     
     // Initialize transaction
     if (!tranxHandler->initializeTransaction(&xdnaAieDevInst, tranxName))
@@ -767,8 +812,12 @@ namespace xdp {
 
           // Configure group event before setting counter
           aie::profile::configGroupEvents(&xdnaAieDevInst, loc, mod, type, metricSet, startEvent, channel0);
-          
-          // Stream switch port configuration uses FAL and is ZOCL-only — not applicable for XDNA.
+
+          // Configure stream switch port
+          // Use XAie_EventSelectStrmPort() directly with the ControlCode DevInst — no FAL resource manager needed.
+          // The call is recorded to the config ASM and CERT will configure the hardware port selector before the application runs.
+          if (aie::isStreamSwitchPortEvent(startEvent))
+            configStreamSwitchPorts(tileMetric.first, loc, type, metricSet, channel0, startEvent);
 
           // Convert logical event IDs to physical IDs for reporting
           uint16_t tmpStart = 0, tmpEnd = 0;
@@ -832,162 +881,63 @@ namespace xdp {
 
 #ifndef XDP_VE2_ZOCL_BUILD
   /****************************************************************************
-   * preparePollElf(): generate poll ASM + convert to ELF (no submission).
+   * generatePollElf(): generate poll ASM, convert to ELF, and submit to CERT.
    *
-   * MUST be called on the main thread (from updateDevice()), NOT from the
-   * polling thread or a destructor. aiebu (invoked by generateELF()) uses
-   * boost regex and global streams that are unsafe to call from a destructor
-   * or after program teardown has begun.
-   *
-   * The resulting ELF file is written to disk. submitPollElf() reads it
-   * and submits to CERT — that step is safe from any thread.
+   * Generates the poll ELF (ASM + ELF) but does NOT submit it to CERT.
+   * The poll ELF must run AFTER the application finishes so that the
+   * counters have accumulated data. Submission happens in poll() at teardown.
    ***************************************************************************/
-  bool AieProfile_VE2Impl::preparePollElf()
+  void AieProfile_VE2Impl::generatePollElf()
   {
     std::string tranxName = "AieProfilePoll";
-
     if (!tranxHandler->initializeTransaction(&xdnaAieDevInst, tranxName)) {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: Unable to initialize poll transaction.");
-      return false;
+      return;
     }
 
-    // Slots 0..N-1: one per performance counter register.
     for (u32 i = 0; i < op_profile_data.size(); i++)
       XAie_SaveRegister(&xdnaAieDevInst, op_profile_data[i], i);
 
-    // Slots N, N+1, N+2, N+3, ...: timer_low + timer_high per unique tile.
-    // We emit exactly one pair per tile regardless of how many counters it has,
-    // so the polling thread can reconstruct the full 64-bit hardware timer value.
-    u32 timerSlot = static_cast<u32>(op_profile_data.size());
-    tileTimerSlotMap.clear();
-    int rowOffset = metadata->getAIETileRowOffset();
-    for (u32 i = 0; i < outputValues.size(); i++) {
-      int col    = static_cast<int>(outputValues[i][0]);
-      int relRow = static_cast<int>(outputValues[i][1]);
-      int absRow = relRow + rowOffset;
-      auto key   = std::make_pair(col, absRow);
-
-      if (tileTimerSlotMap.count(key))
-        continue;  // already emitted for this tile
-
-      tileTimerSlotMap[key] = timerSlot;
-
-      auto moduleType  = aie::getModuleType(absRow, rowOffset);
-      auto tileOffset  = XAie_GetTileAddr(&xdnaAieDevInst, absRow, col);
-
-      uint64_t timerLow, timerHigh;
-      if (moduleType == module_type::core) {
-        timerLow  = aie2ps::cm_timer_low;
-        timerHigh = aie2ps::cm_timer_high;
-      } else if (moduleType == module_type::shim) {
-        timerLow  = aie2ps::shim_timer_low;
-        timerHigh = aie2ps::shim_timer_high;
-      } else if (moduleType == module_type::mem_tile) {
-        timerLow  = aie2ps::mem_timer_low;
-        timerHigh = aie2ps::mem_timer_high;
-      } else {
-        timerLow  = aie2ps::mm_timer_low;
-        timerHigh = aie2ps::mm_timer_high;
-      }
-
-      XAie_SaveRegister(&xdnaAieDevInst, static_cast<u32>(timerLow  + tileOffset), timerSlot);
-      XAie_SaveRegister(&xdnaAieDevInst, static_cast<u32>(timerHigh + tileOffset), timerSlot + 1);
-      timerSlot += 2;
-    }
-
-    // Close the ASM file and convert to ELF — aiebu is called here.
     if (!tranxHandler->completeASM(&xdnaAieDevInst)) {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: Failed to finalize poll ASM.");
-      return false;
+      return;
     }
     if (!tranxHandler->generateELF()) {
       xrt_core::message::send(severity_level::warning, "XRT",
           "AIE Profile: Failed to generate poll ELF.");
-      return false;
-    }
-    xrt_core::message::send(severity_level::debug, "XRT",
-        "AIE Profile: Poll ELF prepared (not yet submitted).");
-    return true;
-  }
-
-  /****************************************************************************
-   * submitPollElf(): submit the pre-generated poll ELF to CERT and read back
-   * the counter values from resultBO.
-   *
-   * Safe to call from the polling thread — uses only XRT API (xrt::elf,
-   * xrt::module, xrt::run), no aiebu/boost/streams.
-   ***************************************************************************/
-  void AieProfile_VE2Impl::submitPollElf(const uint64_t id)
-  {
-    auto hwContext = metadata->getHwContext();
-    if (!tranxHandler->submitELF(hwContext)) {
-      xrt_core::message::send(severity_level::warning, "XRT",
-          "AIE Profile: Failed to submit poll ELF.");
       return;
     }
+
     xrt_core::message::send(severity_level::debug, "XRT",
-        "AIE Profile: Poll ELF submitted successfully.");
-
-    resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    uint32_t* output = resultBO.map<uint32_t*>();
-    double timestamp = xrt_core::time_ns() / 1.0e6;
-    int rowOffset = metadata->getAIETileRowOffset();
-
-    for (u32 i = 0; i < op_profile_data.size(); i++) {
-      std::vector<uint64_t> values = outputValues[i];
-
-      // values[5]: counter value — SAVE_REGISTER stores {addr, value} per slot,
-      // so slot i lives at output[2*i] (addr) and output[2*i+1] (value).
-      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
-
-      // values[6]: 64-bit hardware timer for this tile.
-      // timer_low is at tileTimerSlotMap[tile], timer_high at that slot + 1.
-      int col    = static_cast<int>(values[0]);
-      int relRow = static_cast<int>(values[1]);
-      int absRow = relRow + rowOffset;
-      auto key   = std::make_pair(col, absRow);
-      auto it    = tileTimerSlotMap.find(key);
-      if (it != tileTimerSlotMap.end()) {
-        u32 timerSlot    = it->second;
-        uint64_t timerLo = output[2 * timerSlot + 1];
-        uint64_t timerHi = output[2 * (timerSlot + 1) + 1];
-        values[6] = (timerHi << 32) | timerLo;
-      }
-
-      db->getDynamicInfo().addAIESample(id, timestamp, values);
-    }
+        "AIE Profile: Poll ELF generated (will be submitted at teardown).");
   }
 #endif // !XDP_VE2_ZOCL_BUILD
 
   void AieProfile_VE2Impl::startPoll(const uint64_t id)
   {
+#ifdef XDP_VE2_ZOCL_BUILD
     xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_VE2Impl::startPoll.");
     threadCtrl = true;
     thread = std::make_unique<std::thread>(&AieProfile_VE2Impl::continuePoll, this, id); 
     xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_VE2Impl::startPoll, after creating thread instance.");
+#endif
   }
 
   void AieProfile_VE2Impl::continuePoll(const uint64_t id)
   {
     xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_VE2Impl::continuePoll");
 
+#ifdef XDP_VE2_ZOCL_BUILD
     while (threadCtrl) {
       poll(id);
       std::this_thread::sleep_for(std::chrono::microseconds(metadata->getPollingIntervalVal()));
     }
 
-#ifndef XDP_VE2_ZOCL_BUILD
-    // XDNA one-shot end-of-run: threadCtrl is now false meaning the application has completed.
-    // The poll ELF was already generated (ASM+ELF via aiebu) during updateDevice() on the main
-    // thread. Here we only submit it — no aiebu, safe from within the polling thread.
-    if (!op_profile_data.empty())
-      submitPollElf(id);
-#endif
-
     //Final Polling Operation
     poll(id);
+#endif
   }
 
   void AieProfile_VE2Impl::poll(const uint64_t id)
@@ -1111,16 +1061,39 @@ namespace xdp {
         db->getDynamicInfo().addAIESample(id, timestamp, values);
       }
     }
-#else // XDNA path: data is collected at end-of-run in freeResources() after application completes.
-    // poll() is intentionally a no-op here — the CERT model is one-shot end-of-run,
-    // so counter values are only meaningful after the application ELF has finished.
-    return;
+#else // XDNA path: submit poll ELF now (after app finished), then read resultBO.
+    if (finishedPoll)
+      return;
+
+    if (op_profile_data.empty())
+      return;
+
+    auto hwContext = metadata->getHwContext();
+    if (!tranxHandler->submitELF(hwContext)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to submit poll ELF.");
+      return;
+    }
+
+    resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    uint32_t* output = resultBO.map<uint32_t*>();
+    double timestamp = xrt_core::time_ns() / 1.0e6;
+
+    for (u32 i = 0; i < op_profile_data.size(); i++) {
+      std::vector<uint64_t> values = outputValues[i];
+      // counter value = output[2*i+1]
+      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
+      db->getDynamicInfo().addAIESample(id, timestamp, values);
+    }
+
+    finishedPoll = true;
 #endif // XDP_VE2_ZOCL_BUILD
   }
 
   void AieProfile_VE2Impl::endPoll()
   {
     xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_VE2Impl::endPoll");
+#ifdef XDP_VE2_ZOCL_BUILD
     if (!threadCtrl)
       return;
 
@@ -1129,6 +1102,7 @@ namespace xdp {
       thread->join();
 
     freeResources();
+#endif
   }  
 
   void AieProfile_VE2Impl::freeResources() 
@@ -1155,10 +1129,6 @@ namespace xdp {
       bc->release();
     }
 #endif // XDP_VE2_ZOCL_BUILD
-    // XDNA: poll ELF is submitted and resultBO is read in continuePoll() (inside the live
-    // polling thread), NOT here in freeResources() which is called from the plugin destructor.
-    // Calling aiebu from a destructor during program exit causes a segfault because C++
-    // global streams that aiebu uses internally may already have been destroyed.
   }
 
 #ifdef XDP_VE2_ZOCL_BUILD

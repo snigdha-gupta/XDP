@@ -888,12 +888,17 @@ namespace xdp {
       if ((processed.find(i) != processed.end()) || (metrics[i].size() < 3))
         continue;
 
+      // Only entries with a numeric second token are range specifications.
+      // Valid single-tile settings with channels (for example,
+      // <col>:<metric>:<channel>) also have 3+ tokens and are handled in Pass 3.
+      if (!aie::isDigitString(metrics[i][1]))
+        continue;
+
       uint8_t maxCol = 0;
       try {
         maxCol = aie::convertStringToUint8(metrics[i][1]);
       }
       catch (std::invalid_argument const&) {
-        // Max column is not an integer, so either first style or wrong format. Skip for now.
         xrt_core::message::send(severity_level::warning, "XRT",
                                 "tile_based_interface_tile_metrics: invalid range line. Ignored: "
                                 + metricsSettings[i]);

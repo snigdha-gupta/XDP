@@ -9,21 +9,11 @@
 #include "core/edge/common/aie_parser.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_impl.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
-#ifndef XDP_VE2_ZOCL_BUILD
-#include "xdp/profile/device/common/ve2/ve2_transaction.h"
-#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
-#include "xrt/xrt_bo.h"
-#endif
 #include "xaiefal/xaiefal.hpp"
 
 extern "C" {
-#ifdef XDP_USE_AIE_CODEGEN
-#include <aie_codegen.h>
-#include <aie_codegen_inc/xaiegbl_params.h>
-#else
 #include <xaiengine.h>
 #include <xaiengine/xaiegbl_params.h>
-#endif
 }
 
 namespace xdp {
@@ -32,6 +22,7 @@ namespace xdp {
   class AieProfile_VE2Impl : public AieProfileImpl{
     public:
       AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID);
+
       ~AieProfile_VE2Impl() = default;
 
       void updateDevice();
@@ -42,9 +33,7 @@ namespace xdp {
       void endPoll() override;
 
       void freeResources();
-#ifdef XDP_VE2_ZOCL_BUILD
       bool checkAieDevice(const uint64_t deviceId, void* handle);
-#endif
 
       bool setMetricsSettings(const uint64_t deviceId, void* handle);
       void printTileModStats(xaiefal::XAieDev* aieDevice, 
@@ -72,7 +61,6 @@ namespace xdp {
       std::pair<int, XAie_Events>
       setupBroadcastChannel(const tile_type& currTileLoc);
 
-#ifdef XDP_VE2_ZOCL_BUILD
       inline std::shared_ptr<xaiefal::XAiePerfCounter>
       startCounter(std::shared_ptr<xaiefal::XAiePerfCounter>& pc,
                    XAie_Events counterEvent, XAie_Events& retCounterEvent)
@@ -89,23 +77,23 @@ namespace xdp {
         return pc;
       }
 
-      std::pair<int, XAie_Events> getShimBroadcastChannel(const tile_type& srcTile);
+      std::pair<int, XAie_Events>
+      getShimBroadcastChannel(const tile_type& srcTile);
+
       void displayAdfAPIResults();
-#else
-      void generatePollElf();
-      void configStreamSwitchPorts(const tile_type& tile, const XAie_LocType& loc,
-                                   const module_type& type, const std::string& metricSet,
-                                   const uint8_t channel, const XAie_Events startEvent);
-#endif
 
     private:
+
+    #ifdef XDP_VE2_ZOCL_BUILD
       XAie_DevInst*     aieDevInst = nullptr;
-#ifdef XDP_VE2_ZOCL_BUILD
-      xaiefal::XAieDev* aieDevice  = nullptr;
-#else
-      XAie_DevInst      xdnaAieDevInst = {0};
-      bool finishedPoll = false;
-#endif
+      xaiefal::XAieDev* aieDevice  = nullptr;    
+    #else
+        std::unique_ptr<aie::VE2Transaction> tranxHandler;
+        xrt::bo resultBO;
+        XAie_DevInst aieDevInst = {0};
+        bool finishedPoll = false;
+        std::vector<u32> op_profile_data;
+        std::vector<std::vector<uint64_t>> outputValues;
 
       std::map<std::string, std::vector<XAie_Events>> coreStartEvents;
       std::map<std::string, std::vector<XAie_Events>> coreEndEvents;
@@ -117,8 +105,6 @@ namespace xdp {
       std::map<std::string, std::vector<XAie_Events>> memTileEndEvents; 
       std::map<std::string, std::vector<uint32_t>> microcontrollerEvents;
       std::map<tile_type, std::vector<uint32_t>> microcontrollerTileEvents;
-
-#ifdef XDP_VE2_ZOCL_BUILD
       std::vector<std::shared_ptr<xaiefal::XAiePerfCounter>> perfCounters;
       std::vector<std::shared_ptr<xaiefal::XAieStreamPortSelect>> streamPorts;
 
@@ -137,26 +123,6 @@ namespace xdp {
 
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesBytesTx;
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesLatency;
-#endif
-
-#ifndef XDP_VE2_ZOCL_BUILD
-      // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF.
-      const std::map<module_type, std::vector<uint64_t>> regValues {
-            {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
-                                     aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
-            {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,
-                                     aie2ps::mm_performance_counter2,   aie2ps::mm_performance_counter3}},
-            {module_type::shim,     {aie2ps::shim_performance_counter0, aie2ps::shim_performance_counter1,
-                                     aie2ps::shim_performance_counter2, aie2ps::shim_performance_counter3}},
-            {module_type::mem_tile, {aie2ps::mem_performance_counter0,  aie2ps::mem_performance_counter1,
-                                     aie2ps::mem_performance_counter2,  aie2ps::mem_performance_counter3}}
-      };
-
-      std::unique_ptr<aie::VE2Transaction> tranxHandler;
-      std::vector<u32> op_profile_data;
-      std::vector<std::vector<uint64_t>> outputValues;
-      xrt::bo resultBO;
-#endif
   };
 }   
 

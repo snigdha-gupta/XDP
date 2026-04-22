@@ -15,6 +15,7 @@
 #include "xdp/profile/device/common/ve2/ve2_transaction.h"
 #include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
 #include "xaiefal/xaiefal.hpp"
+#include "xrt/xrt_bo.h"
 
 extern "C" {
 #ifdef XDP_USE_AIE_CODEGEN

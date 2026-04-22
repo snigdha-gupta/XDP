@@ -24,6 +24,7 @@
 #include <map>
 #include <sstream>
 #include <iterator>
+#include <iostream>
 
 #include "core/common/message.h"
 #include "core/common/time.h"
@@ -34,6 +35,9 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "core/common/api/hw_context_int.h"
 #include "shim_ve2/xdna_hwctx.h"
+
+#include "core/common/api/bo_int.h"
+#include "xrt/xrt_bo.h"
 
 #ifdef XDP_VE2_ZOCL_BUILD
   namespace {
@@ -841,7 +845,7 @@ namespace xdp {
     
     microcontrollerEvents = aie::profile::getMicrocontrollerEventSets(hwGen);
 
-    tranxHandler = std::make_unique<aie::VE2Transaction>();
+    tranxHandler = std::make_unique<xdp::aie::VE2Transaction>();
 
     // Create debug buffer for AIE Profile results
     auto context = metadata->getHwContext();
@@ -882,6 +886,9 @@ namespace xdp {
       bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
       if (!runtimeCounters) 
         return;
+
+      // Build poll ASM/ELF after metrics are configured; submit is deferred to endPoll() (see plugin).
+      generatePollElf();
 
       // Generate CT file for AIE profile counters after metrics settings are configured
       if (runtimeCounters && dtraceDebug) {
@@ -1146,9 +1153,15 @@ namespace xdp {
           (db->getStaticInfo()).addAIECounter(deviceId, counterId, col, row, i,
                 phyStartEvent, phyEndEvent, resetEvent, payload, metadata->getClockFreqMhz(), 
                 metadata->getModuleName(module), counterName, (tile.stream_ids.empty() ? 0 : tile.stream_ids[0]));
+          
 
+          std::cout << "!!! col: " << col << std::endl;
+          std::cout << "!!! row: " << row << std::endl;
           auto tileOffset = XAie_GetTileAddr(&aieDevInst, row, col);
+          std::cout << "!!! tileOffset: " << tileOffset << std::endl;
           std::vector<uint64_t> Regs = regValues.at(type);
+          std::cout << "!!! Regs[i]: " << Regs[i] << std::endl;
+          std::cout << "!!! Regs[i] + tileOffset: " << (Regs[i] + tileOffset) << std::endl;
           op_profile_data.emplace_back((u32)(Regs[i] + tileOffset));
 
           std::vector<uint64_t> values;
@@ -1207,8 +1220,7 @@ namespace xdp {
       return;
 
     XAie_DmaDirection dmaDir = aie::isInputSet(type, metricSet) ? DMA_S2MM : DMA_MM2S;
-    uint8_t numChannels = ((type == module_type::shim) && (dmaDir == DMA_MM2S))
-                        ? NUM_CHANNEL_SELECTS_SHIM_NPU3 : NUM_CHANNEL_SELECTS;
+    uint8_t numChannels = NUM_CHANNEL_SELECTS;
 
     if (aie::isDebugVerbosity()) {
       std::string tileType = (type == module_type::shim) ? "interface" : "memory";
@@ -1278,56 +1290,118 @@ namespace xdp {
     }
   }
 
-  void AieProfile_VE2Impl::poll(const uint64_t id)
+  void AieProfile_VE2Impl::generatePollElf()
   {
-    // TODO: read final values from hardware and then populate outputValues and add to database
+    pollElfReady = false;
+    pollElfSubmitted = false;
 
-    auto context = metadata->getHwContext();
+    if (op_profile_data.empty()) {
+      xrt_core::message::send(severity_level::debug, "XRT",
+          "AIE Profile: generatePollElf skipped (no SaveRegister slots).");
+      return;
+    }
 
     std::string tranxName = "AieProfilePoll";
     if (!tranxHandler->initializeTransaction(&aieDevInst, tranxName)) {
-      xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "Unable to initialize transaction for AIE profile polling.");
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Unable to initialize poll transaction.");
       return;
-    }
-    
-    for (u32 i = 0; i < op_profile_data.size(); i++) {
-      XAie_SaveRegister(&aieDevInst, op_profile_data[i], i);
     }
 
-    if (db->infoAvailable(xdp::info::ml_timeline)) {
-        db->broadcast(VPDatabase::MessageType::READ_RECORD_TIMESTAMPS, nullptr);
-        xrt_core::message::send(severity_level::debug, "XRT", "Done reading recorded timestamps.");
-    }
-  
-    if (!tranxHandler->submitTransaction(&aieDevInst, context))
+    for (u32 i = 0; i < op_profile_data.size(); i++)
+      XAie_SaveRegister(&aieDevInst, op_profile_data[i], i);
+
+    if (!tranxHandler->completeASM(&aieDevInst)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to finalize poll ASM.");
       return;
+    }
+    if (!tranxHandler->generateELF()) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: Failed to generate poll ELF.");
+      return;
+    }
+
+    pollElfReady = true;
+    finishedPoll = false;
+    xrt_core::message::send(severity_level::debug, "XRT",
+        "AIE Profile: Poll ASM/ELF ready (submit deferred to teardown).");
+  }
+
+  void AieProfile_VE2Impl::poll(const uint64_t id)
+  {
+    // Wait until xclbin has been loaded and device has been updated in database
+    if (!(db->getStaticInfo().isDeviceReady(id)))
+      return;
+
+    if (finishedPoll)
+      return;
+
+    if (!pollElfSubmitted)
+      return;
+
+    if (op_profile_data.empty())
+      return;
+
+    if (db->infoAvailable(xdp::info::ml_timeline)) {
+      db->broadcast(VPDatabase::MessageType::READ_RECORD_TIMESTAMPS, nullptr);
+      xrt_core::message::send(severity_level::debug, "XRT", "Done reading recorded timestamps.");
+    }
 
     resultBO.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     uint32_t* output = resultBO.map<uint32_t*>();
 
-    // Get timestamp in milliseconds
-    double timestamp = xrt_core::time_ns() / 1.0e6;
-
-    //**************************TODO: Remove this after testing ***************************
-    for (u32 i = 0; i < op_profile_data.size() + 12 * 3; i++) {
-    std::stringstream msg;
-    msg << "Counter address/values: " << output[2 * i] << " - " << output[2 * i + 1];
-    xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", msg.str());
+    const size_t numWords = resultBO.size() / sizeof(uint32_t);
+    if (op_profile_data.size() * 2u > numWords) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE profile poll: result BO too small for (SaveRegister Id, value) pairs.");
+      finishedPoll = true;
+      return;
     }
+
+    for (size_t i = 0; i < op_profile_data.size(); ++i) {
+      std::cout << "AIE profile poll [" << i << "] expect_addr=" << op_profile_data[i]
+                << " addr_got=" << output[2 * i] << " buf_val=" << output[2 * i + 1]
+                << std::endl;
+    }
+
+    const double timestamp = xrt_core::time_ns() / 1.0e6;
 
     // Process counter values and add to database
     for (u32 i = 0; i < op_profile_data.size(); i++) {
-    // Update counter value in outputValues and add to database
-    std::vector<uint64_t> values = outputValues[i];
-    values[5] = static_cast<uint64_t>(output[2 * i + 1]); // Write counter value
-    db->getDynamicInfo().addAIESample(id, timestamp, values);
+      std::vector<uint64_t> values = outputValues[i];
+      values[5] = static_cast<uint64_t>(output[2 * i + 1]);
+      db->getDynamicInfo().addAIESample(id, timestamp, values);
     }
+
+    finishedPoll = true;
   }
 
   bool AieProfile_VE2Impl::checkAieDevice(const uint64_t deviceId, void* handle) {}
   void AieProfile_VE2Impl::startPoll(const uint64_t id) {}
   void AieProfile_VE2Impl::continuePoll(const uint64_t id) {}
-  void AieProfile_VE2Impl::endPoll() {}  
+  void AieProfile_VE2Impl::endPoll()
+  {
+    if (!pollElfReady || pollElfSubmitted)
+      return;
+
+    auto context = metadata->getHwContext();
+    if (!context) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: deferred poll ELF submit skipped (no hardware context).");
+      return;
+    }
+
+    if (!tranxHandler->submitELF(context)) {
+      xrt_core::message::send(severity_level::warning, "XRT",
+          "AIE Profile: deferred poll ELF submit failed.");
+      return;
+    }
+
+    pollElfSubmitted = true;
+    xrt_core::message::send(severity_level::debug, "XRT",
+        "AIE Profile: Poll ELF submitted at teardown (before final BO read).");
+  }
   void AieProfile_VE2Impl::freeResources() {}
   void AieProfile_VE2Impl::displayAdfAPIResults() {}
 

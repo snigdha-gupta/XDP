@@ -231,26 +231,30 @@ auto time = std::time(nullptr);
 
     if (!handle)
       return;
-    
-    // mark the hw_ctx handle as invalid for current plugin
-    (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
 
-    if (handleToAIEProfileImpl.empty())
+    if (handleToAIEProfileImpl.empty()) {
+      (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
       return;
+    }
 
     auto& implementation = handleToAIEProfileImpl[handle];
     if (!implementation) {
+      (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
       handleToAIEProfileImpl.erase(handle);
       return;
     }
-      
+
     #ifdef XDP_CLIENT_BUILD
       implementation->poll(0);
     #elif defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD)
+      // XDNA: submitELF needs hw_context — run before unregisterPluginFromHwContext.
+      implementation->endPoll();
       implementation->poll(implementation->getDeviceID());
     #endif
 
     implementation->endPoll();
+
+    (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
     handleToAIEProfileImpl.erase(handle);
   }
 
@@ -262,10 +266,11 @@ auto time = std::time(nullptr);
       auto& implementation = handleToAIEProfileImpl.begin()->second;
       implementation->poll(0);
     #elif defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD)
-      if (!handleToAIEProfileImpl.empty()) {
-        auto& implementation = handleToAIEProfileImpl.begin()->second;
-        if (implementation)
-          implementation->poll(implementation->getDeviceID());
+      for (auto& p : handleToAIEProfileImpl) {
+        if (!p.second)
+          continue;
+        p.second->endPoll();
+        p.second->poll(p.second->getDeviceID());
       }
     #endif
     // Ask all threads to end

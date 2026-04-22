@@ -5,11 +5,16 @@
 #define AIE_PROFILE_H
 
 #include <cstdint>
+#include <memory>
 
 #include "core/edge/common/aie_parser.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_impl.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
+#include "xrt/xrt_bo.h"
 #include "xaiefal/xaiefal.hpp"
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
+
 
 extern "C" {
 #ifdef XDP_USE_AIE_CODEGEN
@@ -26,8 +31,6 @@ namespace xdp {
   
   class AieProfile_VE2Impl : public AieProfileImpl{
     public:
-      // AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata)
-      //   : AieProfileImpl(database, metadata){}
       AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID);
 
       ~AieProfile_VE2Impl() = default;
@@ -87,12 +90,39 @@ namespace xdp {
       std::pair<int, XAie_Events>
       getShimBroadcastChannel(const tile_type& srcTile);
 
-      void
-      displayAdfAPIResults();
+      void displayAdfAPIResults();
 
     private:
+
+    #ifdef XDP_VE2_ZOCL_BUILD
       XAie_DevInst*     aieDevInst = nullptr;
-      xaiefal::XAieDev* aieDevice  = nullptr;    
+      xaiefal::XAieDev* aieDevice  = nullptr;
+    #else
+      void configEventSelections(const XAie_LocType loc, const module_type type, const std::string metricSet, std::vector<uint8_t>& channels);
+      void configStreamSwitchPorts(const tile_type& tile, const XAie_LocType& loc, const module_type& type, const std::string& metricSet, const uint8_t channel, const XAie_Events startEvent);
+      // ASM -> ELF (aiebu) during updateDevice; submitELF deferred to endPoll() so reads run after the app.
+      // UC result BO: uint32 pairs (SaveRegister Id, read value) per slot.
+      void generatePollElf();
+      std::unique_ptr<xdp::aie::VE2Transaction> tranxHandler;
+      xrt::bo resultBO;
+      XAie_DevInst aieDevInst = {0};
+      bool pollElfReady = false;
+      bool pollElfSubmitted = false;
+      bool finishedPoll = false;
+      std::vector<u32> op_profile_data;
+      std::vector<std::vector<uint64_t>> outputValues;
+      // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF.
+      const std::map<module_type, std::vector<uint64_t>> regValues {
+            {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
+                                    aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
+            {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,
+                                    aie2ps::mm_performance_counter2,   aie2ps::mm_performance_counter3}},
+            {module_type::shim,     {aie2ps::shim_performance_counter0, aie2ps::shim_performance_counter1,
+                                    aie2ps::shim_performance_counter2, aie2ps::shim_performance_counter3}},
+            {module_type::mem_tile, {aie2ps::mem_performance_counter0,  aie2ps::mem_performance_counter1,
+                                    aie2ps::mem_performance_counter2,  aie2ps::mem_performance_counter3}}
+      };
+    #endif
 
       std::map<std::string, std::vector<XAie_Events>> coreStartEvents;
       std::map<std::string, std::vector<XAie_Events>> coreEndEvents;

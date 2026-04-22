@@ -168,6 +168,8 @@ namespace xdp {
 #elif defined(XRT_X86_BUILD)
     implementation = std::make_unique<AieProfile_x86Impl>(db, metadata, deviceID);
 #elif XDP_VE2_BUILD
+    xrt::hw_context context = xrt_core::hw_context_int::create_hw_context_from_implementation(handle);
+    metadata->setHwContext(context);
     implementation = std::make_unique<AieProfile_VE2Impl>(db, metadata, deviceID);
 #else
     implementation = std::make_unique<AieProfile_EdgeImpl>(db, metadata, deviceID);
@@ -229,24 +231,30 @@ auto time = std::time(nullptr);
 
     if (!handle)
       return;
-    
-    // mark the hw_ctx handle as invalid for current plugin
-    (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
 
-    if (handleToAIEProfileImpl.empty())
+    if (handleToAIEProfileImpl.empty()) {
+      (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
       return;
+    }
 
     auto& implementation = handleToAIEProfileImpl[handle];
     if (!implementation) {
+      (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
       handleToAIEProfileImpl.erase(handle);
       return;
     }
-      
+
     #ifdef XDP_CLIENT_BUILD
       implementation->poll(0);
+    #elif defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD)
+      // XDNA: submitELF needs hw_context — run before unregisterPluginFromHwContext.
+      implementation->endPoll();
+      implementation->poll(implementation->getDeviceID());
     #endif
 
     implementation->endPoll();
+
+    (db->getStaticInfo()).unregisterPluginFromHwContext(handle);
     handleToAIEProfileImpl.erase(handle);
   }
 
@@ -257,6 +265,13 @@ auto time = std::time(nullptr);
     #ifdef XDP_CLIENT_BUILD
       auto& implementation = handleToAIEProfileImpl.begin()->second;
       implementation->poll(0);
+    #elif defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD)
+      for (auto& p : handleToAIEProfileImpl) {
+        if (!p.second)
+          continue;
+        p.second->endPoll();
+        p.second->poll(p.second->getDeviceID());
+      }
     #endif
     // Ask all threads to end
     for (auto& p : handleToAIEProfileImpl) {

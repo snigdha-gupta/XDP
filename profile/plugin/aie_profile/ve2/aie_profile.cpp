@@ -910,8 +910,9 @@ namespace xdp {
         AieProfileCTWriter ctWriter(db, metadata, deviceID);
         ctWriter.generate();
       }
+    }
   }
-  
+
   // Set metrics for all specified AIE counters on this device with configs given in AIE_profile_settings
   bool 
   AieProfile_VE2Impl::setMetricsSettings(const uint64_t deviceId, void* handle)
@@ -1028,6 +1029,7 @@ namespace xdp {
           std::stringstream msg;
           msg << metricSet << " **** counter reservation: tile (" << +col << "," << +row 
           xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+        }
         
         numFreeCtr = (startEvents.size() < numFreeCtr) ? startEvents.size() : numFreeCtr;
         if ((type == module_type::shim) && ((metricSet == "ddr_bandwidth") || (metricSet == "read_bandwidth") || (metricSet == "write_bandwidth"))) {

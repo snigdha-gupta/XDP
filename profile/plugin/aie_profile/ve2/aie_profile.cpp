@@ -31,6 +31,9 @@
 #include "core/common/api/hw_context_int.h"
 #include "shim_ve2/xdna_hwctx.h"
 
+#include "core/common/api/bo_int.h"
+#include "xrt/xrt_bo.h"
+
 #ifdef XDP_VE2_ZOCL_BUILD
 namespace {
   static void* fetchAieDevInst(void* devHandle)
@@ -809,7 +812,7 @@ namespace xdp {
       return;
     }
 
-    // Build poll ASM/ELF after metrics are configured; submit is deferred to endPoll() (see plugin).
+    // Build poll ASM/ELF after metrics are configured; submit is deferred to endPoll()
     generatePollElf();
   }
 

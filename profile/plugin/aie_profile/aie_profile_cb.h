@@ -17,6 +17,7 @@
 #ifndef XDP_PLUGIN_AIE_PROFILE_CB_H
 #define XDP_PLUGIN_AIE_PROFILE_CB_H
 
+#include <cstdint>
 #include "xdp/config.h"
 
 extern "C"

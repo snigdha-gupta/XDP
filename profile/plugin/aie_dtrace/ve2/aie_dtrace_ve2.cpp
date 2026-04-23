@@ -3,14 +3,17 @@
 
 #define XDP_PLUGIN_SOURCE 
 
-#include "xdp/profile/plugin/aie_profile/edge/aie_profile.h"
+#include "xdp/profile/plugin/aie_dtrace/ve2/aie_dtrace_ve2.h"
+#include "xdp/profile/plugin/aie_dtrace/ve2/aie_dtrace_ct_writer.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_defs.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_metadata.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_config.h"
 #include "xdp/profile/plugin/aie_base/aie_base_util.h"
+#include "xdp/profile/plugin/aie_base/aie_nop_util.h"
 
 #include "xdp/profile/database/database.h"
+#include "xdp/profile/device/utility.h"
 #include "xdp/profile/database/static_info/aie_util.h"
 #include "xdp/profile/database/static_info/aie_constructs.h"
 #include "xdp/profile/database/static_info/pl_constructs.h"
@@ -23,36 +26,25 @@
 
 #include "core/common/message.h"
 #include "core/common/time.h"
+#include "core/common/config_reader.h"
+#include "core/common/api/kernel_int.h"
+
+#include <filesystem>
+#include <iterator>
+#include <sstream>
+#include "core/common/shim/hwctx_handle.h"
 #include "core/common/api/hw_context_int.h"
-#include "core/edge/user/shim.h"
-#include "core/include/xrt/xrt_kernel.h"
+#include "xdp/profile/plugin/aie_dtrace/ve2/elf_helper.h"
+#include "shim_ve2/xdna_hwctx.h"
 
 namespace {
   static void* fetchAieDevInst(void* devHandle)
   {
-    if (xdp::VPDatabase::Instance()->getStaticInfo().getAppStyle() == xdp::AppStyle::LOAD_XCLBIN_STYLE) {
-      // old style
-      auto drv = ZYNQ::shim::handleCheck(devHandle);
-      if (!drv)
-        return nullptr ;
-      auto aieArray = drv->getAieArray() ;
-      if (!aieArray)
-        return nullptr ;
-      return aieArray->get_dev() ;
-    } else {
-      // new style (hw context flow)
-      xrt::hw_context context = xrt_core::hw_context_int::create_hw_context_from_implementation(devHandle);
-      auto hwctx_hdl = static_cast<xrt_core::hwctx_handle*>(context);
-      if (!hwctx_hdl)
-        return nullptr ;
-      auto hwctx_obj = dynamic_cast<zynqaie::hwctx_object*>(hwctx_hdl);
-      if (!hwctx_obj)
-        return nullptr ;
-      auto aieArray = hwctx_obj->get_aie_array_shared().get();
-      if (!aieArray)
-        return nullptr ;
-      return aieArray->get_dev() ;
-    }
+    xrt::hw_context context = xrt_core::hw_context_int::create_hw_context_from_implementation(devHandle);
+    auto hwctx_hdl = static_cast<xrt_core::hwctx_handle*>(context);
+    auto hwctx_obj = dynamic_cast<shim_xdna_edge::xdna_hwctx*>(hwctx_hdl);
+    auto aieArray = hwctx_obj->get_aie_array();
+    return aieArray->get_dev() ;
   }
 
   static void* allocateAieDevice(void* devHandle)
@@ -76,7 +68,7 @@ namespace xdp {
   using module_type = xdp::module_type;
   using severity_level = xrt_core::message::severity_level;
 
-  AieProfile_EdgeImpl::AieProfile_EdgeImpl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID)
+  AieDtrace_VE2Impl::AieDtrace_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID)
       : AieProfileImpl(database, metadata, deviceID)
   {
     auto hwGen = metadata->getHardwareGen();
@@ -88,14 +80,29 @@ namespace xdp {
     memoryEndEvents = memoryStartEvents;
 
     shimStartEvents = aie::profile::getInterfaceTileEventSets(hwGen);
+    for (const auto& kv : aie::dtrace::getBandwidthInterfaceTileEventSets(hwGen))
+      shimStartEvents[kv.first] = kv.second;
     shimEndEvents = shimStartEvents;
     shimEndEvents[METRIC_BYTE_COUNT] = {XAIE_EVENT_PORT_RUNNING_0_PL, XAIE_EVENT_PERF_CNT_0_PL};
 
     memTileStartEvents = aie::profile::getMemoryTileEventSets(hwGen);
     memTileEndEvents = memTileStartEvents;
+    
+    microcontrollerEvents = aie::profile::getMicrocontrollerEventSets(hwGen);
   }
 
-  bool AieProfile_EdgeImpl::checkAieDevice(const uint64_t deviceId, void* handle)
+  AieDtrace_VE2Impl::~AieDtrace_VE2Impl()
+  {
+    // Hw context destructor / plugin teardown: do not read counters or offload samples to the
+    // dynamic database. Only stop/release FAL resources; join if a poll thread existed.
+    if (thread && thread->joinable()) {
+      threadCtrl = false;
+      thread->join();
+    }
+    releaseConfiguredHwResourcesNoRead();
+  }
+
+  bool AieDtrace_VE2Impl::checkAieDevice(const uint64_t deviceId, void* handle)
   {
     aieDevInst = static_cast<XAie_DevInst*>(db->getStaticInfo().getAieDevInst(fetchAieDevInst, handle, deviceId)) ;
     aieDevice  = static_cast<xaiefal::XAieDev*>(db->getStaticInfo().getAieDevice(allocateAieDevice, deallocateAieDevice, handle, deviceId)) ;
@@ -107,38 +114,195 @@ namespace xdp {
     return true;
   }
 
-  void AieProfile_EdgeImpl::updateDevice() {
-    if (!checkAieDevice(deviceID, metadata->getHandle()))
+  void AieDtrace_VE2Impl::updateDevice() {
+
+      if(!checkAieDevice(deviceID, metadata->getHandle()))
+              return;
+
+      // CT file handles all hardware configuration via write_reg commands in begin block.
+      // No need to submit nop.elf or call setMetricsSettings here.
+      // The code below is preserved for potential fallback flow in the future.
       return;
 
-    // Initialize column shift
-    if (!metadata->getPartitionOverlayStartCols().empty())
-      m_startColShift = metadata->getPartitionOverlayStartCols().front();
-    else
-      m_startColShift = 0;
+      bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
 
-    bool runtimeCounters = setMetricsSettings(deviceID, metadata->getHandle());
-    if (!runtimeCounters) {
-      // No runtime counters means there were no valid metrics configured for profiling this design. There is nothing to profile, so return early.
-      xrt_core::message::send(severity_level::warning, "XRT", 
-        "No valid metric setting found for this design. Please specify valid "
-        "graph_based_[aie|aie_memory|memory_tile|interface_tile]_metrics and/or "
-        "tile_based_[aie|aie_memory|memory_tile|interface_tile|microcontroller]_metrics "
-        "under \"AIE_profile_settings\" section in your xrt.ini if you want to configure this design.");
+      if (!runtimeCounters) {
+        void* h = metadata->getHandle();
+        std::shared_ptr<xrt_core::device> device = xrt_core::get_userpf_device(h);
+        if (!device)
+          device = xdp::util::convertToCoreDevice(h, true);
+        if (!device) {
+          xrt_core::message::send(severity_level::warning, "XRT",
+              "AIE dtrace: could not resolve core device for xclbin profile counters.");
+          (db->getStaticInfo()).setIsAIECounterRead(deviceID, true);
+          return;
+        }
+        auto counters = xrt_core::edge::aie::get_profile_counters(device.get());
+
+        if (counters.empty()) {
+          xrt_core::message::send(severity_level::warning, "XRT", 
+            "AIE dtrace: no counters found. Specify "
+            "AIE_dtrace_settings.tile_based_interface_tile_metrics or "
+            "graph_based_interface_tile_metrics (same style as AIE_profile_settings).");
+          (db->getStaticInfo()).setIsAIECounterRead(deviceID,true);
+          return;
+        }
+        else {
+          XAie_DevInst* aieDevInst =
+            static_cast<XAie_DevInst*>(db->getStaticInfo().getAieDevInst(fetchAieDevInst, metadata->getHandle()));
+          
+          if (!aieDevInst) {
+            xrt_core::message::send(severity_level::warning, "XRT", 
+              "Failed to get AIE device instance for profile counters.");
+            return;
+          }
+
+          xrt_core::message::send(severity_level::debug, "XRT", "Processing " + std::to_string(counters.size()) + " counters");
+          for (auto& counter : counters) {
+            std::stringstream msg;
+            msg << "Adding counter " << counter.id << " at (" 
+                << +counter.column << "," << +counter.row << ") module: " << counter.module;
+            xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+            
+            // For pre-configured counters from xclbin metadata, the hardware is already configured
+            // Payload is used for reporting metadata (channel/stream IDs), set to 0 for these counters
+            // as we don't have full tile information (stream_ids, is_master_vec) to safely compute it
+            uint64_t payload = 0;
+            
+            (db->getStaticInfo()).addAIECounter(deviceID, counter.id, counter.column,
+                counter.row, counter.counterNumber, counter.startEvent, counter.endEvent,
+                counter.resetEvent, payload, counter.clockFreqMhz, counter.module, counter.name);
+          }
+          xrt_core::message::send(severity_level::debug, "XRT", "Finished processing counters");
+        }
+      }
+  }
+
+  void AieDtrace_VE2Impl::computeOpLocations(void* elf_handle, const std::string& kernel_name)
+  {
+    if (m_op_locations_cache.count(kernel_name))
       return;
+
+    if (!elf_handle) {
+      xrt_core::message::send(severity_level::debug, "XRT",
+          "AIE dtrace: No ELF handle available for kernel '" + kernel_name + "'");
+      return;
+    }
+
+    try {
+      auto buf = xdp::get_elf_buffer(elf_handle);
+      aiebu::aiebu_assembler assembler(buf);
+
+      auto get_op_tbl = [&]() {
+        if (!kernel_name.empty()) {
+          try {
+            return assembler.get_op_locations(0x1c, kernel_name);
+          }
+          catch (...) {
+            xrt_core::message::send(severity_level::debug, "XRT",
+                "AIE dtrace: get_op_locations with kernel name '" + kernel_name
+                + "' failed, retrying without kernel name");
+          }
+        }
+        return assembler.get_op_locations(0x1c);
+      };
+
+      m_op_locations_cache[kernel_name] = get_op_tbl().get_line_info();
+
+      std::stringstream msg;
+      msg << "AIE dtrace: Extracted " << m_op_locations_cache[kernel_name].size()
+          << " instance op_locations for kernel '" << kernel_name << "' from ELF";
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+    }
+    catch (const std::exception& e) {
+      std::stringstream msg;
+      msg << "AIE dtrace: Could not extract op_locations from ELF for kernel '"
+          << kernel_name << "': " << e.what();
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+    }
+  }
+
+  void AieDtrace_VE2Impl::generateCTForRun(void* run_impl_ptr, void* hwctx, uint32_t run_uid,
+                                             const std::string& kernel_name,
+                                             void* elf_handle)
+  {
+    if (!xrt_core::config::get_aie_dtrace())
+      return;
+
+    auto ctx = xrt_core::hw_context_int::create_hw_context_from_implementation(hwctx);
+    auto slotIdx = static_cast<xrt_core::hwctx_handle*>(ctx)->get_slotidx();
+
+    std::string filename = "aie_profile_ctx_" + std::to_string(slotIdx)
+                         + "_run_" + std::to_string(run_uid) + ".ct";
+    std::string outputPath = (std::filesystem::current_path() / filename).string();
+
+    computeOpLocations(elf_handle, kernel_name);
+
+    boost::property_tree::ptree aiePartitionPt = xdp::aie::getAIEPartitionInfo(hwctx);
+    uint8_t partitionStartCol = aiePartitionPt.empty() ? 0
+        : static_cast<uint8_t>(aiePartitionPt.back().second.get<uint64_t>("start_col"));
+
+    AieDtraceCTWriter ctWriter(db, metadata, deviceID, partitionStartCol);
+
+    bool generated = false;
+    auto it = m_op_locations_cache.find(kernel_name);
+
+    if (it != m_op_locations_cache.end() && !it->second.empty()) {
+      generated = ctWriter.generateBandwidthCT(outputPath, hwctx, it->second);
+      if (generated) {
+        xrt_core::message::send(severity_level::debug, "XRT",
+            "AIE dtrace: Bandwidth CT generated (self-contained) for kernel '"
+            + kernel_name + "'");
+      }
+    }
+
+    if (!generated && it != m_op_locations_cache.end() && !it->second.empty()) {
+      if (db->getStaticInfo().getNumAIECounter(deviceID) > 0) {
+        generated = ctWriter.generate(outputPath, it->second);
+        if (generated)
+          xrt_core::message::send(severity_level::debug, "XRT",
+              "AIE dtrace: CT generated using aiebu API (get_op_locations) for kernel '"
+              + kernel_name + "'");
+      }
+    }
+
+    if (!generated && db->getStaticInfo().getNumAIECounter(deviceID) > 0) {
+      generated = ctWriter.generate(outputPath);
+      if (generated)
+        xrt_core::message::send(severity_level::debug, "XRT",
+            "AIE dtrace: CT generated using CSV file (aie_profile_timestamps.csv) for kernel '"
+            + kernel_name + "'");
+    }
+
+    if (!generated)
+      return;
+
+    auto* run_impl = static_cast<xrt::run_impl*>(run_impl_ptr);
+    try {
+      xrt_core::kernel_int::set_dtrace_control_file(run_impl, outputPath);
+      std::stringstream msg;
+      msg << "AIE dtrace: Set per-run CT file '" << outputPath
+          << "' for run uid=" << run_uid << " ctx slot=" << slotIdx;
+      xrt_core::message::send(severity_level::info, "XRT", msg.str());
+    }
+    catch (const std::exception& e) {
+      std::stringstream msg;
+      msg << "AIE dtrace: Could not set per-run CT file: " << e.what();
+      xrt_core::message::send(severity_level::debug, "XRT", msg.str());
     }
   }
 
   // Get reportable payload specific for this tile and/or counter
   uint64_t 
-  AieProfile_EdgeImpl::getCounterPayload(XAie_DevInst* aieDevInst, 
+  AieDtrace_VE2Impl::getCounterPayload(XAie_DevInst* aieDevInst, 
                                          const tile_type& tile, 
                                          const module_type type, 
                                          uint8_t column, 
                                          uint8_t row, 
                                          uint16_t startEvent, 
                                          const std::string metricSet,
-                                         const uint8_t channel)
+                                         const uint8_t channel,
+                                         uint8_t logicalPortIndex)
   {
     // 1. Profile API specific values
     if (aie::profile::profileAPIMetricSet(metricSet))
@@ -147,12 +311,21 @@ namespace xdp {
     // 2. Channel/stream IDs for interface tiles
     if (type == module_type::shim) {
       // NOTE: value = ((isMaster) << 8) & (isChannel << 7) & (channel/stream ID)
-      auto portnum = aie::getPortNumberFromEvent(static_cast<XAie_Events>(startEvent));
+      // portnum = physical stream-switch port (0-7) from event; stream_ids/is_master_vec
+      // are indexed by logical port (size = number of configured ports). When portnum is
+      // out of range (e.g. physical ports 4-7 when only 4 logical ports), use
+      // logicalPortIndex.
+      auto portnum = xdp::aie::getPortNumberFromEvent(static_cast<XAie_Events>(startEvent));
       uint8_t streamPortId = (portnum >= tile.stream_ids.size()) ?
           0 : static_cast<uint8_t>(tile.stream_ids.at(portnum));
       uint8_t idToReport = (tile.subtype == io_type::GMIO) ? channel : streamPortId;
       uint8_t isChannel  = (tile.subtype == io_type::GMIO) ? 1 : 0;
-      uint8_t isMaster = aie::isInputSet(type, metricSet) ? 0 : 1;
+      uint8_t isMaster = aie::isInputSet(type, metricSet)  ? 0 : 1;
+      if ((type == module_type::shim) && ((metricSet == "ddr_bandwidth") || (metricSet == "read_bandwidth") || (metricSet == "write_bandwidth"))) {
+        uint8_t idx = (portnum < tile.is_master_vec.size()) ? portnum
+                    : (logicalPortIndex < tile.is_master_vec.size()) ? logicalPortIndex : 0;
+        isMaster = tile.is_master_vec.at(idx);
+      }
 
       return ((isMaster << PAYLOAD_IS_MASTER_SHIFT)
              | (isChannel << PAYLOAD_IS_CHANNEL_SHIFT) | idToReport);
@@ -203,7 +376,7 @@ namespace xdp {
                                  XAIEGBL_MEM_DMABD6CTRL_VALBD_MASK, XAIEGBL_MEM_DMABD7CTRL_VALBD_MASK};
 
     uint32_t maxBDSize = 0;
-    auto tileOffset = XAie_GetTileAddr(aieDevInst, row, getXAIECol(tile.col));
+    auto tileOffset = XAie_GetTileAddr(aieDevInst, row, column);
     for (int bd = 0; bd < NUM_BDS; ++bd) {
       uint32_t regValue = 0;
       XAie_Read32(aieDevInst, tileOffset + offsets[bd], &regValue);
@@ -219,7 +392,7 @@ namespace xdp {
   }
   
   uint64_t 
-  AieProfile_EdgeImpl::getAdfProfileAPIPayload(const tile_type& tile, const std::string metricSet)
+  AieDtrace_VE2Impl::getAdfProfileAPIPayload(const tile_type& tile, const std::string metricSet)
   {
     if (metricSet == METRIC_LATENCY)
       return metadata->getIntfLatencyPayload(tile);
@@ -227,11 +400,12 @@ namespace xdp {
     return 0;
   }
 
-  void AieProfile_EdgeImpl::printTileModStats(xaiefal::XAieDev* aieDevice, 
+  void AieDtrace_VE2Impl::printTileModStats(xaiefal::XAieDev* aieDevice, 
       const tile_type& tile, XAie_ModuleType mod)
   {
+    auto col = tile.col;
     auto row = tile.row;
-    auto loc = XAie_TileLoc(getXAIECol(tile.col), row);
+    auto loc = XAie_TileLoc(col, row);
     std::string moduleName = (mod == XAIE_CORE_MOD) ? "aie" 
                            : ((mod == XAIE_MEM_MOD) ? "aie_memory" 
                            : "interface_tile");
@@ -240,10 +414,9 @@ namespace xdp {
       XAIEDEV_DEFAULT_GROUP_STATIC,
       XAIEDEV_DEFAULT_GROUP_AVAIL
     };
-    
-    auto absCol = tile.col + m_startColShift;
+
     std::stringstream msg;
-    msg << "Resource usage stats for Tile : (" << +absCol << "," << +row 
+    msg << "Resource usage stats for Tile : (" << +col << "," << +row 
         << ") Module : " << moduleName << std::endl;
     for (auto&g : groups) {
       auto stats = aieDevice->getRscStat(g);
@@ -262,12 +435,13 @@ namespace xdp {
 
   // Set metrics for all specified AIE counters on this device with configs given in AIE_profile_settings
   bool 
-  AieProfile_EdgeImpl::setMetricsSettings(const uint64_t deviceId, void* handle)
+  AieDtrace_VE2Impl::setMetricsSettings(const uint64_t deviceId, void* handle)
   {
     int counterId = 0;
     bool runtimeCounters = false;
 
     auto stats = aieDevice->getRscStat(XAIEDEV_DEFAULT_GROUP_AVAIL);
+    auto hwGen = metadata->getHardwareGen();
     auto configChannel0 = metadata->getConfigChannel0();
     auto configChannel1 = metadata->getConfigChannel1();
     uint8_t startColShift = metadata->getPartitionOverlayStartCols().front();
@@ -285,13 +459,26 @@ namespace xdp {
       for (auto& tileMetric : configMetrics) {
         auto& metricSet  = tileMetric.second;
         auto tile        = tileMetric.first;
-        auto absCol      = tile.col + startColShift;
-        auto relCol      = tile.col;
+        auto col         = tile.col + startColShift;
         auto row         = tile.row;
         auto subtype     = tile.subtype;
         auto type        = aie::getModuleType(row, metadata->getAIETileRowOffset());
         if ((mod == XAIE_MEM_MOD) && (type == module_type::core))
           type = module_type::dma;
+        
+        // Catch microcontroller event sets for MDM
+        if (module == static_cast<int>(module_type::uc)) {
+          // Configure
+          auto events = microcontrollerEvents[metricSet];
+          aie::profile::configMDMCounters(aieDevInst, hwGen, col, row, events);
+          // Record
+          tile_type recordTile;
+          recordTile.col = col;
+          recordTile.row = row;
+          microcontrollerTileEvents[recordTile] = events;
+          runtimeCounters = true;
+          continue;
+        }
 
         // Ignore invalid types and inactive modules
         // NOTE: Inactive core modules are configured when utilizing
@@ -305,9 +492,19 @@ namespace xdp {
             continue;
         }
 
-        auto loc        = XAie_TileLoc(getXAIECol(tile.col), row);
-        auto& xaieTile  = aieDevice->tile(getXAIECol(tile.col), row);
+        // Skip interface tiles with empty stream_ids for throughput metrics
+        if ((type == module_type::shim) && 
+            ((metricSet == "read_bandwidth") || (metricSet == "write_bandwidth") || (metricSet == "ddr_bandwidth")) &&
+            tile.stream_ids.empty()) {
+          std::stringstream msg;
+          msg << "Skipping " << metricSet << " configuration for tile (" << +col << "," << +row 
+              << ") - stream_ids is empty";
+          xrt_core::message::send(severity_level::warning, "XRT", msg.str());
+          continue;
+        }
 
+        auto loc         = XAie_TileLoc(col, row);
+        auto& xaieTile   = aieDevice->tile(col, row);
         auto xaieModule  = (mod == XAIE_CORE_MOD) ? xaieTile.core()
                          : ((mod == XAIE_MEM_MOD) ? xaieTile.mem() 
                          : xaieTile.pl());
@@ -324,7 +521,20 @@ namespace xdp {
 
         int numCounters  = 0;
         auto numFreeCtr  = stats.getNumRsc(loc, mod, xaiefal::XAIE_PERFCOUNT);
+        
+        if (aie::isDebugVerbosity() && ((metricSet == "ddr_bandwidth") || (metricSet == "read_bandwidth") || (metricSet == "write_bandwidth"))) {
+          std::stringstream msg;
+          msg << metricSet << " **** counter reservation: tile (" << +col << "," << +row 
+              << ") startEvents.size()=" << startEvents.size()
+              << " hardware_counters=" << numFreeCtr
+              << " tile.stream_ids.size()=" << tile.stream_ids.size();
+          xrt_core::message::send(severity_level::debug, "XRT", msg.str());
+        }
+        
         numFreeCtr = (startEvents.size() < numFreeCtr) ? startEvents.size() : numFreeCtr;
+        if ((type == module_type::shim) && ((metricSet == "ddr_bandwidth") || (metricSet == "read_bandwidth") || (metricSet == "write_bandwidth"))) {
+          numFreeCtr = tile.stream_ids.size();
+        }
 
         int numFreeCtrSS = numFreeCtr;
         if (aie::profile::profileAPIMetricSet(metricSet)) {
@@ -387,7 +597,9 @@ namespace xdp {
           auto endEvent      = endEvents.at(i);
           auto resetEvent    = XAIE_EVENT_NONE_CORE;
           auto portnum       = xdp::aie::getPortNumberFromEvent(startEvent);
-          uint8_t channel    = (portnum == 0) ? channel0 : channel1;
+          // For metric sets with 4 ports (like ddr_bandwidth), use modulo for channel mapping
+          uint8_t channelNum = portnum % 2;
+          uint8_t channel    = (channelNum == 0) ? channel0 : channel1;
 
           // Configure group event before reserving and starting counter
           aie::profile::configGroupEvents(aieDevInst, loc, mod, type, metricSet, startEvent, channel);
@@ -428,7 +640,7 @@ namespace xdp {
 
           // Generate user_event_1 for byte count metric set after configuration
           if ((metricSet == METRIC_BYTE_COUNT) && (i == 1) && !graphItrBroadcastConfigDone) {
-            XAie_LocType tileloc = XAie_TileLoc(getXAIECol(tile.col), tile.row);
+            XAie_LocType tileloc = XAie_TileLoc(tile.col, tile.row);
             //Note: For BYTE_COUNT metric, user_event_1 is used twice as eventA & eventB to
             //      to transition the FSM from Idle->State0->State1.
             //      eventC = Port Running and eventD = stop event (counter event).
@@ -443,11 +655,11 @@ namespace xdp {
           uint16_t phyEndEvent   = physicalEventIds.second;
 
           // Get payload for reporting purposes
-          uint64_t payload = getCounterPayload(aieDevInst, tileMetric.first, type, getXAIECol(tile.col), row, 
-                                               startEvent, metricSet, channel);
+          uint64_t payload = getCounterPayload(aieDevInst, tileMetric.first, type, col, row, 
+                                               startEvent, metricSet, channel, static_cast<uint8_t>(i));
           // Store counter info in database
           std::string counterName = "AIE Counter " + std::to_string(counterId);
-          (db->getStaticInfo()).addAIECounter(deviceId, counterId, getXAIECol(tile.col), row, i,
+          (db->getStaticInfo()).addAIECounter(deviceId, counterId, col, row, i,
                 phyStartEvent, phyEndEvent, resetEvent, payload, metadata->getClockFreqMhz(), 
                 metadata->getModuleName(module), counterName, (tile.stream_ids.empty() ? 0 : tile.stream_ids[0]));
           counterId++;
@@ -455,7 +667,7 @@ namespace xdp {
         } // numFreeCtr
 
         std::stringstream msg;
-        msg << "Reserved " << numCounters << " counters for profiling AIE tile (" << +absCol 
+        msg << "Reserved " << numCounters << " counters for profiling AIE tile (" << +col 
             << "," << +row << ") using metric set " << metricSet << ".";
         xrt_core::message::send(severity_level::debug, "XRT", msg.str());
         numTileCounters[numCounters]++;
@@ -480,199 +692,51 @@ namespace xdp {
     return runtimeCounters;
   }
 
-  void AieProfile_EdgeImpl::startPoll(const uint64_t id)
+  // Dtrace does not run a profiling poll loop or offload samples; bandwidth is consumed via dtrace.
+  void AieDtrace_VE2Impl::startPoll(const uint64_t /*id*/) {}
+
+  void AieDtrace_VE2Impl::continuePoll(const uint64_t /*id*/) {}
+
+  void AieDtrace_VE2Impl::poll(const uint64_t /*id*/) {}
+
+  void AieDtrace_VE2Impl::endPoll()
   {
-    xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_EdgeImpl::startPoll.");
-    threadCtrl = true;
-    thread = std::make_unique<std::thread>(&AieProfile_EdgeImpl::continuePoll, this, id); 
-    xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_EdgeImpl::startPoll, after creating thread instance.");
+    // Hw context destructor calls endAIEDtracePoll -> endPollforDevice; avoid reads/offload here.
+    // Resource release happens in ~AieDtrace_VE2Impl when the implementation is destroyed.
   }
 
-  void AieProfile_EdgeImpl::continuePoll(const uint64_t id)
+  void AieDtrace_VE2Impl::freeResources()
   {
-    xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_EdgeImpl::continuePoll");
-
-    while (threadCtrl) {
-      poll(id);
-      std::this_thread::sleep_for(std::chrono::microseconds(metadata->getPollingIntervalVal()));
-    }
-    //Final Polling Operation
-    poll(id);
+    releaseConfiguredHwResourcesNoRead();
   }
 
-  void AieProfile_EdgeImpl::poll(const uint64_t id)
+  void AieDtrace_VE2Impl::releaseConfiguredHwResourcesNoRead()
   {
-    // Wait until xclbin has been loaded and device has been updated in database
-    if (!(db->getStaticInfo().isDeviceReady(id)))
-      return;
-
-    if (!aieDevInst)
-      return;
-
-    uint32_t prevColumn = 0;
-    uint32_t prevRow = 0;
-    uint64_t timerValue = 0;
-
-    // Iterate over all AIE Counters & Timers
-    auto numCounters = db->getStaticInfo().getNumAIECounter(id);
-    for (uint64_t c=0; c < numCounters; c++) {
-      auto aie = db->getStaticInfo().getAIECounter(id, c);
-      if (!aie)
-        continue;
-
-      auto absCol = (db->getStaticInfo().getAppStyle() == xdp::AppStyle::LOAD_XCLBIN_STYLE)
-                    ? aie->column 
-                    : aie->column + metadata->getPartitionOverlayStartCols().front() ;
-      auto relCol = (db->getStaticInfo().getAppStyle() == xdp::AppStyle::LOAD_XCLBIN_STYLE)
-                    ? aie->column - metadata->getPartitionOverlayStartCols().front()
-                    : aie->column ;
-
-      std::vector<uint64_t> values;
-      values.push_back(absCol);
-      values.push_back(aie::getRelativeRow(aie->row, metadata->getAIETileRowOffset()));
-      values.push_back(aie->startEvent);
-      values.push_back(aie->endEvent);
-      values.push_back(aie->resetEvent);
-
-      // Read counter value from device
-      uint32_t counterValue;
-      if (perfCounters.empty()) {
-        // Compiler-defined counters
-        XAie_LocType tileLocation = XAie_TileLoc(getXAIECol(relCol), aie->row);
-        XAie_PerfCounterGet(aieDevInst, tileLocation, XAIE_CORE_MOD, aie->counterNumber, &counterValue);
+    for (auto& c : perfCounters) {
+      if (c) {
+        c->stop();
+        c->release();
       }
-      else {
-        // Runtime-defined counters
-        if (aie::profile::adfAPILatencyConfigEvent(aie->startEvent))
-        {
-          uint32_t srcCounterValue = 0;
-          uint32_t destCounterValue = 0;
-          try {
-            std::string srcDestPairKey = metadata->getSrcDestPairKey(aie->column, aie->row, aie->streamId);
-            uint64_t srcPcIdx = adfAPIResourceInfoMap.at(aie::profile::adfAPI::INTF_TILE_LATENCY).at(srcDestPairKey).srcPcIdx;
-            uint64_t destPcIdx = adfAPIResourceInfoMap.at(aie::profile::adfAPI::INTF_TILE_LATENCY).at(srcDestPairKey).destPcIdx;
-            auto srcPerfCount = perfCounters.at(srcPcIdx);
-            auto destPerfCount = perfCounters.at(destPcIdx);
-            srcPerfCount->readResult(srcCounterValue);
-            destPerfCount->readResult(destCounterValue);
-            counterValue = (destCounterValue > srcCounterValue) ? (destCounterValue-srcCounterValue) : (srcCounterValue-destCounterValue);
-            uint64_t storedValue = adfAPIResourceInfoMap[aie::profile::adfAPI::INTF_TILE_LATENCY][srcDestPairKey].profileResult;
-            if (counterValue != storedValue)
-              adfAPIResourceInfoMap[aie::profile::adfAPI::INTF_TILE_LATENCY][srcDestPairKey].profileResult = counterValue;
-          } catch(...) {
-            continue;
-          }
-        }
-        else if (aie::profile::adfAPIStartToTransferredConfigEvent(aie->startEvent))
-        {
-          try {
-            std::string srcKey = "(" + aie::uint8ToStr(aie->column) + "," + aie::uint8ToStr(aie->row) + ")";
-            uint64_t srcPcIdx = adfAPIResourceInfoMap.at(aie::profile::adfAPI::START_TO_BYTES_TRANSFERRED).at(srcKey).srcPcIdx;
-            auto perfCounter = perfCounters.at(srcPcIdx);
-            perfCounter->readResult(counterValue);
-            uint64_t storedValue = adfAPIResourceInfoMap[aie::profile::adfAPI::START_TO_BYTES_TRANSFERRED][srcKey].profileResult;
-            if (counterValue != storedValue)
-              adfAPIResourceInfoMap[aie::profile::adfAPI::START_TO_BYTES_TRANSFERRED][srcKey].profileResult = counterValue;
-          } catch(...) {
-            continue;
-          }
-        } 
-        else {
-          auto perfCounter = perfCounters.at(c);
-          perfCounter->readResult(counterValue);
-        }
+    }
+
+    for (auto& c : streamPorts) {
+      if (c) {
+        c->stop();
+        c->release();
       }
-      values.push_back(counterValue);
+    }
 
-      // Read tile timer (once per tile to minimize overhead)
-      if ((aie->column != prevColumn) || (aie->row != prevRow)) {
-        prevColumn = aie->column;
-        prevRow = aie->row;
-        auto moduleType = aie::getModuleType(aie->row, metadata->getAIETileRowOffset());
-        auto falModuleType =  (moduleType == module_type::core) ? XAIE_CORE_MOD 
-                            : ((moduleType == module_type::shim) ? XAIE_PL_MOD 
-                            : XAIE_MEM_MOD);
-        XAie_LocType tileLocation = XAie_TileLoc(getXAIECol(relCol), aie->row);
-        XAie_ReadTimer(aieDevInst, tileLocation, falModuleType, &timerValue);
+    for (auto& bc : bcResourcesBytesTx) {
+      if (bc) {
+        bc->stop();
+        bc->release();
       }
-      values.push_back(timerValue);
-      values.push_back(aie->payload);
-
-      // Get timestamp in milliseconds
-      double timestamp = xrt_core::time_ns() / 1.0e6;
-      db->getDynamicInfo().addAIESample(id, timestamp, values);
-    }
-  }
-
-  void AieProfile_EdgeImpl::endPoll()
-  {
-    xrt_core::message::send(severity_level::debug, "XRT", " In AieProfile_EdgeImpl::endPoll");
-    if (!threadCtrl)
-      return;
-
-    threadCtrl = false;
-    if (thread && thread->joinable())
-      thread->join();
-
-    freeResources();
-  }  
-
-
-  void AieProfile_EdgeImpl::freeResources() 
-  {
-    displayAdfAPIResults();
-    for (auto& c : perfCounters){
-      c->stop();
-      c->release();
     }
 
-    for (auto& c : streamPorts){
-      c->stop();
-      c->release();
-    }
-
-    for (auto &bc : bcResourcesBytesTx) {
-      bc->stop();
-      bc->release();
-    }
-
-    for (auto &bc : bcResourcesLatency) {
-      bc->stop();
-      bc->release();
-    }
-  }
-
-  /****************************************************************************
-   * Display start to bytes or latency results to output transcript
-   ***************************************************************************/
-  void AieProfile_EdgeImpl::displayAdfAPIResults()
-  {
-    for (auto &adfAPIType : adfAPIResourceInfoMap) {
-      if (adfAPIType.first == aie::profile::adfAPI::START_TO_BYTES_TRANSFERRED) {
-        for (auto &adfApiResource : adfAPIType.second) {
-          std::stringstream msg;
-          msg << "Total start to bytes transferred for tile " << adfApiResource.first << " is " 
-              << +adfApiResource.second.profileResult << " clock cycles for specified bytes.";
-          xrt_core::message::send(severity_level::warning, "XRT", msg.str());
-        }
-      }
-      else if (adfAPIType.first == aie::profile::adfAPI::INTF_TILE_LATENCY) {
-        for(auto &adfApiResource : adfAPIType.second) {
-          GraphPortPair graphPortPair;
-          try {
-            graphPortPair = metadata->getSrcDestGraphPair(adfApiResource.first);
-          }
-          catch (...) {
-            continue;
-          }
-
-          std::stringstream msg;
-          msg << "Total latency between " << graphPortPair.srcGraphName 
-              << ":" << graphPortPair.srcGraphPort << " and "
-              << graphPortPair.destGraphName << ":" << graphPortPair.destGraphPort 
-              << " is " << +adfApiResource.second.profileResult << " clock cycles.";
-          xrt_core::message::send(severity_level::warning, "XRT", msg.str());
-        }
+    for (auto& bc : bcResourcesLatency) {
+      if (bc) {
+        bc->stop();
+        bc->release();
       }
     }
   }

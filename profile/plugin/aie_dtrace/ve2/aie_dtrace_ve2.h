@@ -1,42 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved
 
-#ifndef AIE_PROFILE_H
-#define AIE_PROFILE_H
+#ifndef AIE_DTRACE_VE2_H
+#define AIE_DTRACE_VE2_H
 
 #include <cstdint>
-#include <memory>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "aiebu/aiebu_assembler.h"
 #include "core/edge/common/aie_parser.h"
 #include "xdp/profile/plugin/aie_profile/aie_profile_impl.h"
 #include "xdp/profile/plugin/aie_profile/util/aie_profile_util.h"
-#include "xrt/xrt_bo.h"
+#include "xdp/profile/plugin/aie_dtrace/util/aie_dtrace_util.h"
 #include "xaiefal/xaiefal.hpp"
-#include "xdp/profile/device/common/ve2/ve2_transaction.h"
-#include "xdp/profile/plugin/aie_base/generations/aie2ps_registers.h"
-
 
 extern "C" {
-#ifdef XDP_USE_AIE_CODEGEN
-#include <aie_codegen.h>
-#include <aie_codegen_inc/xaiegbl_params.h>
-#else
 #include <xaiengine.h>
 #include <xaiengine/xaiegbl_params.h>
-#endif
 }
 
 namespace xdp {
   using tile_type = xdp::tile_type;
   
-  class AieProfile_VE2Impl : public AieProfileImpl{
+  class AieDtrace_VE2Impl : public AieProfileImpl{
     public:
-      AieProfile_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID);
+      // AieDtrace_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata)
+      //   : AieProfileImpl(database, metadata){}
+      AieDtrace_VE2Impl(VPDatabase* database, std::shared_ptr<AieProfileMetadata> metadata, uint64_t deviceID);
 
-      ~AieProfile_VE2Impl() = default;
+      ~AieDtrace_VE2Impl() override;
 
       void updateDevice();
 
@@ -46,6 +40,9 @@ namespace xdp {
       void endPoll() override;
 
       void freeResources();
+      void generateCTForRun(void* run_impl_ptr, void* hwctx, uint32_t run_uid,
+                           const std::string& kernel_name,
+                           void* elf_handle) override;
       bool checkAieDevice(const uint64_t deviceId, void* handle);
 
       bool setMetricsSettings(const uint64_t deviceId, void* handle);
@@ -93,39 +90,11 @@ namespace xdp {
       std::pair<int, XAie_Events>
       getShimBroadcastChannel(const tile_type& srcTile);
 
-      void displayAdfAPIResults();
+      // Stop/release configured FAL objects only (no counter read / sample offload).
+      void releaseConfiguredHwResourcesNoRead();
 
-    private:
-
-    #ifdef XDP_VE2_ZOCL_BUILD
       XAie_DevInst*     aieDevInst = nullptr;
-      xaiefal::XAieDev* aieDevice  = nullptr;
-    #else
-      void configEventSelections(const XAie_LocType loc, const module_type type, const std::string metricSet, std::vector<uint8_t>& channels);
-      void configStreamSwitchPorts(const tile_type& tile, const XAie_LocType& loc, const module_type& type, const std::string& metricSet, const uint8_t channel, const XAie_Events startEvent);
-      // ASM -> ELF (aiebu) during updateDevice; submitELF deferred to endPoll() so reads run after the app.
-      // UC result BO: uint32 pairs (SaveRegister Id, read value) per slot.
-      void generatePollElf();
-      std::unique_ptr<xdp::aie::VE2Transaction> tranxHandler;
-      xrt::bo resultBO;
-      XAie_DevInst aieDevInst = {0};
-      bool pollElfReady = false;
-      bool pollElfSubmitted = false;
-      bool finishedPoll = false;
-      std::vector<u32> op_profile_data;
-      std::vector<std::vector<uint64_t>> outputValues;
-      // Register offsets per tile type for VE2 (AIE2PS) — used to build the poll ELF.
-      const std::map<module_type, std::vector<uint64_t>> regValues {
-            {module_type::core,     {aie2ps::cm_performance_counter0,   aie2ps::cm_performance_counter1,
-                                    aie2ps::cm_performance_counter2,   aie2ps::cm_performance_counter3}},
-            {module_type::dma,      {aie2ps::mm_performance_counter0,   aie2ps::mm_performance_counter1,
-                                    aie2ps::mm_performance_counter2,   aie2ps::mm_performance_counter3}},
-            {module_type::shim,     {aie2ps::shim_performance_counter0, aie2ps::shim_performance_counter1,
-                                    aie2ps::shim_performance_counter2, aie2ps::shim_performance_counter3}},
-            {module_type::mem_tile, {aie2ps::mem_performance_counter0,  aie2ps::mem_performance_counter1,
-                                    aie2ps::mem_performance_counter2,  aie2ps::mem_performance_counter3}}
-      };
-    #endif
+      xaiefal::XAieDev* aieDevice  = nullptr;    
 
       std::map<std::string, std::vector<XAie_Events>> coreStartEvents;
       std::map<std::string, std::vector<XAie_Events>> coreEndEvents;
@@ -155,6 +124,10 @@ namespace xdp {
 
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesBytesTx;
       std::vector<std::shared_ptr<xaiefal::XAieBroadcast>> bcResourcesLatency;
+
+      std::map<std::string, std::vector<aiebu::aiebu_assembler::op_loc>> m_op_locations_cache;
+
+      void computeOpLocations(void* elf_handle, const std::string& kernel_name);
   };
 }   
 

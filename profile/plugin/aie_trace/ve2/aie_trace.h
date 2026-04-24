@@ -10,6 +10,10 @@
 #include "xdp/profile/plugin/aie_trace/aie_trace_impl.h"
 #include "xdp/profile/plugin/aie_trace/util/aie_trace_config.h"
 
+#ifndef XDP_VE2_ZOCL_BUILD
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#endif
+
 namespace xdp {
 
   class AieTrace_VE2Impl : public AieTraceImpl {
@@ -28,14 +32,11 @@ namespace xdp {
     bool tileHasFreeRsc(xaiefal::XAieDev* aieDevice, XAie_LocType& loc, 
                         const module_type type, const std::string& metricSet);
     bool setMetricsSettings(uint64_t deviceId, void* handle);
-    bool configureWindowedEventTrace(xaiefal::XAieDev* aieDevice);
 
   private:
     typedef XAie_Events EventType;
     typedef std::vector<EventType> EventVector;
     typedef std::vector<uint32_t> ValueVector;
-    XAie_DevInst* aieDevInst = nullptr;
-    xaiefal::XAieDev* aieDevice = nullptr;
 
     // AIE resources
     std::vector<std::shared_ptr<xaiefal::XAiePerfCounter>> perfCounters;
@@ -73,6 +74,24 @@ namespace xdp {
 
     // Keep track of number of events reserved per module and/or tile
     int mNumTileTraceEvents[static_cast<int>(module_type::num_types)][NUM_TRACE_EVENTS + 1];
+
+    #ifndef XDP_VE2_ZOCL_BUILD
+      XAie_DevInst aieDevInst = {0};
+      bool configureWindowedEventTrace(void* handle);
+      void build2ChannelBroadcastNetwork(void *handle, uint8_t broadcastId1, uint8_t broadcastId2, XAie_Events event);
+      void reset2ChannelBroadcastNetwork(void *handle, uint8_t broadcastId1, uint8_t broadcastId2);
+      module_type getTileType(uint8_t row);
+      uint16_t getRelativeRow(uint16_t absRow);
+      uint32_t bcIdToEvent(int bcId);
+      std::unique_ptr<aie::VE2Transaction> tranxHandler;
+      bool m_trace_start_broadcast;
+      EventType memoryModTraceStartEvent;
+    #else
+      XAie_DevInst* aieDevInst = nullptr;
+      xaiefal::XAieDev* aieDevice = nullptr;
+      bool configureWindowedEventTrace(xaiefal::XAieDev* aieDevice);
+
+    #endif
   };
 
 }  // namespace xdp

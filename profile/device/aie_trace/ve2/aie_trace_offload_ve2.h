@@ -28,13 +28,17 @@
 #include "core/include/xrt/xrt_hw_context.h"
 
 #include "xdp/profile/device/tracedefs.h"
-#include "xdp/profile/device/common/ve2/ve2_transaction.h"
 #include "xdp/profile/plugin/aie_trace/aie_trace_metadata.h"
 
+#if defined(XDP_VE2_BUILD) && defined(XDP_VE2_ZOCL_BUILD)
+// Edge ZOCL: xaiengine only (no aie_codegen / ve2_transaction).
 extern "C" {
-#include <aie_codegen.h>
-#include <aie_codegen_inc/xaiegbl_params.h>
+#include <xaiengine.h>
+#include <xaiengine/xaiegbl_params.h>
 }
+#else
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#endif
 
 namespace xdp {
 

@@ -11,6 +11,7 @@
 #include "xrt/xrt_hw_context.h"
 #include "xrt/xrt_kernel.h"
 
+// XDNA-only: pulled from device offload via aie_trace_offload_ve2.h (ZOCL does not use this file).
 extern "C" {
 #include <aie_codegen.h>
 #include <aie_codegen_inc/xaiegbl_params.h>

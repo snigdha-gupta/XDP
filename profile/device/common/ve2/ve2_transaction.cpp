@@ -80,7 +80,6 @@ namespace xdp::aie {
         libpaths.push_back("./");
 
         try {
-#if 1
             //Read ASM file
             std::string asmFileName = getAsmFileName();
             if (!std::filesystem::exists(asmFileName))
@@ -111,26 +110,6 @@ namespace xdp::aie {
             std::cout << "Elf size:" << e.size() << std::endl;
             std::ofstream outElf(getElfFileName(), std::ios_base::binary);
             outElf.write(e.data(), e.size());
-#else
-            auto check1 = std::getenv("AIEBU_REPO");
-            auto check2 = std::getenv("PYTHONPATH");
-            if ((check1 == nullptr) || (check2 == nullptr)) {
-                xrt_core::message::send(xrt_core::message::severity_level::warning, "XRT",
-                  "Please define AIEBU_REPO and PYTHONPATH so elf generation can work.");
-                return false;
-            }
-
-            std::stringstream command;
-            command << "${AIEBU_REPO}/src/python/aiebu/control_asm_disasm.py -t aie4 "
-                    << getAsmFileName() << " -o " << getElfFileName();
-            xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT",
-                                    "Generating ELF using: " + command.str());
-            if (system(command.str().c_str())) {
-                xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", 
-                                        "Elf generation failed");
-                return false;
-            }
-#endif
         }
         catch(const std::exception& e) {
             xrt_core::message::send(xrt_core::message::severity_level::error, "XRT",
@@ -172,14 +151,14 @@ namespace xdp::aie {
 
         xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "XDP_KERNEL created");
         xrt::run run{kernel};
-
         xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "Kernel run created");
+        
         run.start();
-
         xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "Run started");
+        
         run.wait2();
-
         xrt_core::message::send(xrt_core::message::severity_level::debug, "XRT", "Wait done!");
+        
         return true;
     }
 

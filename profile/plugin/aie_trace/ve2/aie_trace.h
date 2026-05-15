@@ -6,13 +6,15 @@
 
 #include <cstdint>
 
-#include "xaiefal/xaiefal.hpp"
-#include "xdp/profile/plugin/aie_trace/aie_trace_impl.h"
-#include "xdp/profile/plugin/aie_trace/util/aie_trace_config.h"
-
+// xaiefal.hpp pulls <aie_codegen.h>, which includes xaie_noc.h before XAIE_AIG_EXPORT exists unless
+// xaiegbl_dynlink.h is seen first. ve2_transaction.h establishes that order for VE2 XDNA.
 #ifndef XDP_VE2_ZOCL_BUILD
 #include "xdp/profile/device/common/ve2/ve2_transaction.h"
 #endif
+
+#include "xaiefal/xaiefal.hpp"
+#include "xdp/profile/plugin/aie_trace/aie_trace_impl.h"
+#include "xdp/profile/plugin/aie_trace/util/aie_trace_config.h"
 
 namespace xdp {
 

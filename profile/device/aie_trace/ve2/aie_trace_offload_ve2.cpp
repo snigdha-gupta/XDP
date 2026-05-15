@@ -19,6 +19,7 @@
 #define XDP_PLUGIN_SOURCE
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
 
 #include "core/include/xrt.h"
@@ -27,8 +28,11 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "core/include/xrt/xrt_hw_context.h"
 #include "core/common/api/hw_context_int.h"
-#include "shim_ve2/xdna_hwctx.h"
-#include "shim_ve2/xdna_aie_array.h"
+// VE2 XDNA + aie_codegen: establish which xaiegbl.h (which in turn decides which XAie_* layout) before any TU-local include that might pull
+// xaiengine/xaiegbl.h (same XAIEGBL_H guard). Not used for VE2 ZOCL (xaiengine path).
+#if defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD) && defined(XDP_USE_AIE_CODEGEN)
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#endif
 #include "xdp/profile/database/database.h"
 #include "xdp/profile/database/static_info/aie_constructs.h"
 #include "xdp/profile/plugin/aie_base/aie_nop_util.h"
@@ -42,7 +46,6 @@
 
 namespace xdp {
 
-
 AIETraceOffload::AIETraceOffload
   ( void* handle, uint64_t id
   , PLDeviceIntf* dInt
@@ -52,7 +55,7 @@ AIETraceOffload::AIETraceOffload
   , uint64_t numStrm
 #if defined(XDP_VE2_BUILD) && defined(XDP_VE2_ZOCL_BUILD)
   , XAie_DevInst* devInstance
-#elif defined(XDP_VE2_BUILD)
+#elif defined(XDP_VE2_BUILD) && ! defined(XDP_VE2_ZOCL_BUILD)
   , xrt::hw_context ctx
   , std::shared_ptr<AieTraceMetadata> md
 #endif
@@ -64,18 +67,19 @@ AIETraceOffload::AIETraceOffload
   , isPLIO(isPlio)
   , totalSz(totalSize)
   , numStream(numStrm)
+#if defined(XDP_VE2_BUILD) && defined(XDP_VE2_ZOCL_BUILD)
+  , devInst(devInstance)
+#elif defined(XDP_VE2_BUILD) && ! defined(XDP_VE2_ZOCL_BUILD)
+  , context(ctx)
+  , metadata(md)
+#endif
   , traceContinuous(false)
   , offloadIntervalUs(0)
   , bufferInitialized(false)
   , offloadStatus(AIEOffloadThreadStatus::IDLE)
   , mEnCircularBuf(false)
   , mCircularBufOverwrite(false)
-#if defined(XDP_VE2_BUILD) && defined(XDP_VE2_ZOCL_BUILD)
-  , devInst(devInstance)
-#elif defined(XDP_VE2_BUILD)
-  , context(ctx)
-  , metadata(md)
-#endif
+
 {
   bufAllocSz = deviceIntf->getAlignedTraceBufSize(totalSz, static_cast<unsigned int>(numStream));
 
@@ -274,21 +278,10 @@ bool AIETraceOffload::initReadTrace()
     if(XAIE_OK != driverStatus) {
       throw std::runtime_error("Initialization of DMA Descriptor failed while setting up SHIM DMA channel for GMIO Trace offload");
     }
+    
     RC = XAie_DmaChannelEnable(&aieDevInst, loc, channelNumber, dmaDir);
     RC = XAie_DmaSetAxi(&dmaDesc, 0, traceGMIO->burstLength, 0, 0, 0);
-
-    // XAie_MemInst memInst;
-    // XAie_MemCacheProp prop = XAIE_MEM_CACHEABLE;
-    // xclBufferExportHandle boExportHandle = deviceIntf->exportTraceBuf(buffers[i].bufId);
-    // if(XRT_NULL_BO_EXPORT == boExportHandle) {
-    //   throw std::runtime_error("Unable to export BO while attaching to AIE Driver");
-    // }
-    // XAie_MemAttach(&aieDevInst,  &memInst, 0, 0, 0, prop, boExportHandle);
-
-    // char* vaddr = reinterpret_cast<char *>(mmap(NULL, bufAllocSz, PROT_READ | PROT_WRITE, MAP_SHARED, boExportHandle, 0));
-    // XAie_DmaSetAddrLen(&dmaDesc, (uint64_t)vaddr, bufAllocSz);
     RC = XAie_DmaSetAddrLen(&dmaDesc, xrt_bos[i].address(), static_cast<uint32_t>(bufAllocSz));
-    
     RC = XAie_DmaEnableBd(&dmaDesc);
     RC = XAie_DmaWriteBd(&aieDevInst, &dmaDesc, loc, bdNum);
     RC = XAie_DmaChannelPushBdToQueue(&aieDevInst, loc, channelNumber, dmaDir, bdNum);
@@ -296,6 +289,7 @@ bool AIETraceOffload::initReadTrace()
 
   if (!tranxHandler->submitTransaction(&aieDevInst, context))
       return false;
+
       
   xrt_core::message::send(severity_level::info, "XRT", "Successfully scheduled AIE Trace Offloading VE2.");
 
@@ -303,8 +297,6 @@ bool AIETraceOffload::initReadTrace()
   return bufferInitialized;
 }
 #endif
-
-// TODO: NPU3 does not have lines 199-213. why?
 
 #ifdef XDP_VE2_ZOCL_BUILD
 void AIETraceOffload::endReadTrace()
@@ -336,25 +328,6 @@ void AIETraceOffload::endReadTrace()
 #else // XDNA
 void AIETraceOffload::endReadTrace()
 {
-  // // reset
-  // for (uint64_t i = 0; i < numStream ; ++i) {
-  //   if (!buffers[i].bufId)
-  //       continue;
-    
-  //   VPDatabase* db = VPDatabase::Instance();
-  //   TraceGMIO*  traceGMIO = (db->getStaticInfo()).getTraceGMIO(deviceId, i);
-
-  //   // channelNumber: (0-S2MM0,1-S2MM1,2-MM2S0,3-MM2S1)
-  //   // Enable shim DMA channel, need to start first so the status is correct
-  //   uint16_t channelNumber = (traceGMIO->channelNumber > 1) ? (traceGMIO->channelNumber - 2) : traceGMIO->channelNumber;
-  //   XAie_DmaDirection dir = (traceGMIO->channelNumber > 1) ? DMA_MM2S : DMA_S2MM;
-
-  //   XAie_DmaChannelDisable(&aieDevInst, gmioDMAInsts[i].gmioTileLoc, channelNumber, dir);
-
-  //   buffers[i].bufId = 0;
-  // }
-  // bufferInitialized = false;
-
   for (uint64_t i = 0; i < numStream ; ++i) {
     if (!buffers[i].bufId)
       continue;

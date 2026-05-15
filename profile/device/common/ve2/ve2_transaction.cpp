@@ -180,4 +180,56 @@ namespace xdp::aie {
             return false;
         return true;
     }
+
+    bool VE2Transaction::prepareFlushKernel(xrt::hw_context hwContext)
+    {
+        xrt_core::message::send(severity_level::info, "XRT",
+            "Preparing flush kernel from ELF: " + getElfFileName());
+        try {
+            xrt::elf flushElf(getElfFileName());
+            xrt::module mod{flushElf};
+            m_flushKernel = xrt::ext::kernel{hwContext, mod, "XDP_KERNEL:{IPUV1CNN}"};
+            m_flushKernelReady = true;
+            xrt_core::message::send(severity_level::info, "XRT",
+                "Flush kernel prepared successfully.");
+            return true;
+        } catch (const std::exception& e) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                std::string("Failed to prepare flush kernel: ") + e.what());
+            m_flushKernelReady = false;
+            return false;
+        } catch (...) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                "Failed to prepare flush kernel (unknown error).");
+            m_flushKernelReady = false;
+            return false;
+        }
+    }
+
+    bool VE2Transaction::runFlushKernel()
+    {
+        if (!m_flushKernelReady) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                "Flush kernel was not prepared. Cannot flush AIE trace.");
+            return false;
+        }
+        try {
+            xrt_core::message::send(severity_level::debug, "XRT", "Running pre-created flush kernel");
+            xrt::run run{m_flushKernel};
+            xrt_core::message::send(severity_level::debug, "XRT", "Flush kernel run created");
+            run.start();
+            xrt_core::message::send(severity_level::debug, "XRT", "Flush run started");
+            run.wait2();
+            xrt_core::message::send(severity_level::debug, "XRT", "Flush run done!");
+            return true;
+        } catch (const std::exception& e) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                std::string("Flush kernel run failed: ") + e.what());
+            return false;
+        } catch (...) {
+            xrt_core::message::send(severity_level::warning, "XRT",
+                "Flush kernel run failed (unknown error).");
+            return false;
+        }
+    }
 }

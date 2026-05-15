@@ -35,6 +35,9 @@ namespace xdp::aie {
       bool completeASM(XAie_DevInst* aieDevInst);
       bool generateELF();
       bool submitELF(xrt::hw_context hwContext);
+
+      bool prepareFlushKernel(xrt::hw_context hwContext);
+      bool runFlushKernel();
       
       void setTransactionName(std::string newTransactionName) {m_transactionName = newTransactionName;}
       std::string getAsmFileName() { return m_transactionName + ".asm"; }
@@ -50,6 +53,9 @@ namespace xdp::aie {
       std::vector<uint8_t> m_rows;
       std::vector<uint64_t> m_offsets;
       std::vector<uint32_t> m_values;
+
+      xrt::kernel m_flushKernel;
+      bool m_flushKernelReady = false;
   };
 
 } // namespace xdp::aie

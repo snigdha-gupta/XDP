@@ -409,10 +409,10 @@ void AieTracePluginUnified::flushAIEDevice(void *handle) {
 void AieTracePluginUnified::finishFlushAIEDevice(void *handle) {
   xrt_core::message::send(severity_level::info, "XRT",
                           "Beginning AIE Trace finishFlushAIEDevice.");
-  #if defined(XDP_VE2_BUILD) || (defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD))
-    // For now, just return please
-    return;
-  #endif
+#if defined(XDP_CLIENT_BUILD) || (defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD))
+  // For now, just return please
+  return;
+#endif
 
   if (!handle)
     return;
@@ -454,8 +454,8 @@ void AieTracePluginUnified::writeAll(bool openNewFiles) {
 
     if (AIEData.valid) {
       AIEData.implementation->flushTraceModules();
-      if (AIEData.offloadManager)
-        AIEData.offloadManager->flushAll(true);
+        if (AIEData.offloadManager)
+          AIEData.offloadManager->flushAll(true);
     }
   }
 

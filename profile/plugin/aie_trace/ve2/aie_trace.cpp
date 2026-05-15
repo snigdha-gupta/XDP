@@ -99,9 +99,6 @@ namespace xdp {
     memoryTileTraceEndEvent = XAIE_EVENT_USER_EVENT_1_MEM_TILE;
     interfaceTileTraceStartEvent = XAIE_EVENT_TRUE_PL;
     interfaceTileTraceEndEvent = XAIE_EVENT_USER_EVENT_1_PL;
-
-    // TODO: tranxHandler to record ASM transaction
-    // TODO: XAie_cfg to create local aieDevInst
   }
 
   /****************************************************************************
@@ -1255,8 +1252,6 @@ namespace xdp {
     interfaceTileTraceStartEvent = XAIE_EVENT_TRUE_PL;
     interfaceTileTraceEndEvent = XAIE_EVENT_USER_EVENT_1_PL;
 
-    tranxHandler = std::make_unique<aie::VE2Transaction>();
-
     xdp::aie::driver_config meta_config = metadata->getAIEConfigMetadata();
     XAie_Config cfg {
       meta_config.hw_gen,
@@ -1276,6 +1271,8 @@ namespace xdp {
     auto RC = XAie_CfgInitialize(&aieDevInst, &cfg);
     if (RC != XAIE_OK)
       xrt_core::message::send(severity_level::warning, "XRT", "AIE Driver Initialization Failed.");
+
+    tranxHandler = std::make_unique<aie::VE2Transaction>();
   }
 
   /****************************************************************************
@@ -1963,6 +1960,12 @@ namespace xdp {
 
     xrt_core::message::send(severity_level::info, "XRT", "Successfully generated ELF for AIE Trace Flush.");
 
+    // Pre-create the flush kernel now while the hw_context and static
+    // infrastructure (dev2ips, ip_context) are still alive.  At flush
+    // time we reuse this kernel, avoiding ip_context::open() which
+    // would touch the already-destroyed static map during teardown.
+    tranxHandler->prepareFlushKernel(hwContextSubmit);
+
     return true;
   }  // end setMetricsSettings
 
@@ -1998,8 +2001,7 @@ namespace xdp {
     interfaceTileTraceFlushLocs.clear();
 
     xrt_core::message::send(severity_level::info, "XRT", "Before AIE trace flush.");
-    auto hwContext = metadata->getHwContext();
-    if (!tranxHandler->submitELF(hwContext)) {
+    if (!tranxHandler->runFlushKernel()) {
       xrt_core::message::send(severity_level::warning, "XRT",
         "AIE trace flush control-code submission failed.");
       return;

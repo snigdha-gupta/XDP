@@ -28,17 +28,18 @@
 #include "core/include/xrt/xrt_hw_context.h"
 
 #include "xdp/profile/device/tracedefs.h"
-#include "xdp/profile/plugin/aie_trace/aie_trace_metadata.h"
 
-#if defined(XDP_VE2_BUILD) && defined(XDP_VE2_ZOCL_BUILD)
-// Edge ZOCL: xaiengine only (no aie_codegen / ve2_transaction).
+// VE2 ZOCL: xaiengine. VE2 XDNA + aie_codegen: ve2_transaction pulls xaiegbl_dynlink + aie_codegen first.
+#if defined(XDP_VE2_BUILD) && !defined(XDP_VE2_ZOCL_BUILD) && defined(XDP_USE_AIE_CODEGEN)
+#include "xdp/profile/device/common/ve2/ve2_transaction.h"
+#else
 extern "C" {
 #include <xaiengine.h>
 #include <xaiengine/xaiegbl_params.h>
 }
-#else
-#include "xdp/profile/device/common/ve2/ve2_transaction.h"
 #endif
+
+#include "xdp/profile/plugin/aie_trace/aie_trace_metadata.h"
 
 namespace xdp {
 
@@ -121,12 +122,27 @@ public:
       return offloadStatus;
     };
 
-    void readTrace(bool final) {mReadTrace(final);};
+    inline void readTrace(bool final) { mReadTrace(final); }
 
 private:
+    void*           deviceHandle;
+    uint64_t        deviceId;
+    PLDeviceIntf*   deviceIntf;
+    AIETraceLogger* traceLogger;
     bool isPLIO;
     uint64_t totalSz;
     uint64_t numStream;
+#if defined(XDP_VE2_BUILD) && ! defined(XDP_VE2_ZOCL_BUILD) // XDNA VE2
+    xrt::hw_context context;
+    std::shared_ptr<AieTraceMetadata> metadata;
+    std::vector<xrt::bo> xrt_bos;
+    XAie_DevInst    aieDevInst = {0};
+    std::unique_ptr<xdp::aie::VE2Transaction> tranxHandler;
+#else // ZOCL VE2
+    XAie_DevInst*   devInst;
+    std::vector<AIETraceGmioDMAInst> gmioDMAInsts;
+#endif
+
     uint64_t bufAllocSz;
     std::vector<AIETraceBufferInfo>  buffers;
 
@@ -156,21 +172,6 @@ private:
     uint64_t syncAndLog(uint64_t index);
     std::function<void(bool)> mReadTrace;
     uint64_t searchWrittenBytes(void * buf, uint64_t bytes);
-    
-    void*           deviceHandle;
-    uint64_t        deviceId;
-    PLDeviceIntf*   deviceIntf;
-    AIETraceLogger* traceLogger;
-#if defined(XDP_VE2_BUILD) && ! defined(XDP_VE2_ZOCL_BUILD)
-    std::unique_ptr<xdp::aie::VE2Transaction> tranxHandler;
-    xrt::hw_context context;
-    std::shared_ptr<AieTraceMetadata> metadata;
-    std::vector<xrt::bo> xrt_bos;
-    XAie_DevInst    aieDevInst = {0};
-#else
-    XAie_DevInst*   devInst;
-    std::vector<AIETraceGmioDMAInst> gmioDMAInsts;
-#endif
 };
 
 }

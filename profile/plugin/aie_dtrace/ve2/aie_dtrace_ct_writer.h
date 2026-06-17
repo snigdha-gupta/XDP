@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved
 
 #ifndef AIE_DTRACE_CT_WRITER_H
 #define AIE_DTRACE_CT_WRITER_H
@@ -18,7 +18,7 @@ namespace xdp {
 
 // Forward declarations
 class VPDatabase;
-class AieProfileMetadata;
+class AieDtraceMetadata;
 struct AIECounter;
 
 /**
@@ -106,14 +106,14 @@ public:
   /**
    * @brief Constructor
    * @param database Pointer to the VPDatabase for accessing counter configuration
-   * @param metadata Pointer to AieProfileMetadata for AIE configuration info
+   * @param metadata Pointer to AieDtraceMetadata for AIE configuration info
    * @param deviceId The device ID for which to generate the CT file
    * @param startCol Absolute start column of the hw_context partition; added to
    *                 relative counter columns so the CT file contains absolute
    *                 hardware addresses regardless of where XRT placed the partition
    */
   AieDtraceCTWriter(VPDatabase* database,
-                     std::shared_ptr<AieProfileMetadata> metadata,
+                     std::shared_ptr<AieDtraceMetadata> metadata,
                      uint64_t deviceId,
                      uint8_t startCol);
 
@@ -297,7 +297,7 @@ private:
 
 private:
   VPDatabase* db;
-  std::shared_ptr<AieProfileMetadata> metadata;
+  std::shared_ptr<AieDtraceMetadata> metadata;
   uint64_t deviceId;
 
   // AIE configuration values

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved
 
 #define XDP_PLUGIN_SOURCE
 
 #include "xdp/profile/plugin/aie_dtrace/ve2/aie_dtrace_ct_writer.h"
-#include "xdp/profile/plugin/aie_profile/aie_profile_metadata.h"
+#include "xdp/profile/plugin/aie_dtrace/aie_dtrace_metadata.h"
 #include "xdp/profile/database/database.h"
 #include "xdp/profile/database/static_info/aie_constructs.h"
 #include "xdp/profile/database/static_info/aie_util.h"
@@ -83,7 +83,7 @@ using severity_level = xrt_core::message::severity_level;
 namespace fs = std::filesystem;
 
 AieDtraceCTWriter::AieDtraceCTWriter(VPDatabase* database,
-                                       std::shared_ptr<AieProfileMetadata> metadata,
+                                       std::shared_ptr<AieDtraceMetadata> metadata,
                                        uint64_t deviceId,
                                        uint8_t startCol)
     : db(database)

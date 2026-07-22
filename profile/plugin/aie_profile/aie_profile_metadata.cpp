@@ -26,6 +26,8 @@
 #include "core/common/config_reader.h"
 #include "core/common/device.h"
 #include "core/common/message.h"
+#include "core/common/utils.h"
+
 #include "xdp/profile/database/database.h"
 #include "xdp/profile/plugin/vp_base/profiling_runtime_config.h"
 #include "xdp/profile/plugin/vp_base/vp_base_plugin.h"
@@ -67,7 +69,10 @@ namespace xdp {
     std::string settingFile = xrt_core::config::get_xdp_json();
     PluginJsonSetting pluginSettings;
     
-    if (!settingFile.empty() && SettingsJsonParser::getInstance().isValidJson(settingFile)) {
+    // Only check for JSON file as an input if not running as root
+    if (!xrt_core::utils::is_elevated_process() &&
+        !settingFile.empty() &&
+        SettingsJsonParser::getInstance().isValidJson(settingFile)) {
       xrt_core::message::send(severity_level::info, "XRT",
         "Using JSON settings from '" + settingFile + "'");
       

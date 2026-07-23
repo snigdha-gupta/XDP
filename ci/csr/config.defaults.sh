@@ -25,3 +25,7 @@
 
 : "${CSR_WAIT_TIMEOUT_SEC:=14400}"
 : "${XDP_CSR_SUBMIT_MODE:=local}"
+
+# Trial phase: run one XDP design instead of the full VE2_XDP suite (~15 tests).
+# Set empty to run all tests in the merged TQL.
+: "${XDP_CSR_SINGLE_TEST:=ResNet18_MLTimeline}"

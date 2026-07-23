@@ -56,17 +56,14 @@ RESULTS_DIR="${SPRITE_DIR}/results"
 mkdir -p "${RESULTS_DIR}"
 chmod a+w "${SPRITE_DIR}" "${RESULTS_DIR}" "$(dirname "${SPRITE_DIR}")" 2>/dev/null || true
 
-if [ -f /proj/xtools/dsv/rdi2/utils/setRDIEnv.csh ]; then
-  # tcsh env file; source from bash with nounset disabled for optional vars.
-  set +u
-  # shellcheck disable=SC1091
-  source /proj/xtools/dsv/rdi2/utils/setRDIEnv.csh 2>/dev/null || true
-  set -u
-fi
-
 echo "Launching CSR RDI locally: ${RDI_SCRIPT}"
 cd "${SPRITE_DIR}"
-bash "${RDI_SCRIPT}"
+
+# setRDIEnv.csh is tcsh; sourcing it from bash does not put rdi on PATH.
+tcsh -f <<EOF
+source /proj/xtools/dsv/rdi2/utils/setRDIEnv.csh
+bash ${RDI_SCRIPT}
+EOF
 
 mapfile -t LOG_FILES < <(find "${RESULTS_DIR}" -maxdepth 1 -name 'rdi_*.log' -type f | sort)
 if [ "${#LOG_FILES[@]}" -eq 0 ]; then
@@ -76,6 +73,14 @@ fi
 
 echo "Monitoring ${#LOG_FILES[@]} RDI log(s):"
 printf '  %s\n' "${LOG_FILES[@]}"
+
+for log in "${LOG_FILES[@]}"; do
+  if grep -q 'command not found' "${log}" 2>/dev/null; then
+    echo "RDI launch failed in ${log}:" >&2
+    cat "${log}" >&2
+    exit 1
+  fi
+done
 
 deadline=$(( $(date +%s) + TIMEOUT_SEC ))
 pending=("${LOG_FILES[@]}")
@@ -98,6 +103,12 @@ while [ "${#pending[@]}" -gt 0 ]; do
       fi
     else
       still_pending+=( "${log}" )
+      if [ "$(wc -c < "${log}")" -lt 512 ] && \
+         find "${log}" -mmin +2 2>/dev/null | grep -q .; then
+        echo "RDI log stalled (no progress): ${log}" >&2
+        cat "${log}" >&2
+        exit 1
+      fi
       echo "Still running: ${log}"
     fi
   done

@@ -306,6 +306,7 @@ jobs:
       VE2_YOCTO_DIR: /scratch/snigupta/ve2_yocto_cache/Vitis-AI-Telluride/versal_2ve/reference_design/vek385/rev-b/sw/yocto
       CSR_ROOT: /wrk/csr/snigupta/xdp_ci
       XDP_CSR_SUBMIT_MODE: local
+      XDP_CSR_SINGLE_TEST: ResNet18_MLTimeline
       JENKINS_USER: ${{ secrets.JENKINS_USER }}
       JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
 
@@ -328,7 +329,7 @@ jobs:
           echo "## XDP VE2 Board Test (CSR)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Trigger: ${{ github.event_name }} (${{ github.ref_name }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Suite: VE2_XDP (hw)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Suite: VE2_XDP (hw), single test: ResNet18_MLTimeline" >> "$GITHUB_STEP_SUMMARY"
           echo "- CSR workspace: ${CSR_ROOT}/pr-${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Submit mode: local RDI (set XDP_CSR_SUBMIT_MODE=jenkins when Job/Build granted)" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ job.status }}" = "success" ]; then

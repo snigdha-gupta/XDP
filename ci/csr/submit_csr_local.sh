@@ -124,4 +124,53 @@ if [ "${failed}" -ne 0 ]; then
   exit 1
 fi
 
+# RDI can finish cleanly while individual tests fail; check suite summaries.
+check_suite_test_results() {
+  local results_dir="$1"
+  local summary fail_count stats line
+  local -a summaries=()
+  local saw_summary=0
+  local saw_failure=0
+
+  shopt -s nullglob
+  summaries=( "${results_dir}"/*/*.summary "${results_dir}"/*.summary )
+  shopt -u nullglob
+
+  if [ "${#summaries[@]}" -eq 0 ]; then
+    echo "No CSR suite .summary files found under ${results_dir}" >&2
+    return 1
+  fi
+
+  for summary in "${summaries[@]}"; do
+    [ -f "${summary}" ] || continue
+    saw_summary=1
+    stats="$(sed -n '2p' "${summary}")"
+    fail_count="$(awk '{print ($3 ~ /^[0-9]+$/) ? $3 : 0}' <<< "${stats}")"
+    if [ "${fail_count:-0}" -gt 0 ]; then
+      saw_failure=1
+      echo "CSR test failure(s) reported in ${summary}" >&2
+      awk '/^ishitag:/,0' "${summary}" >&2 || true
+    fi
+  done
+
+  if [ "${saw_summary}" -eq 0 ]; then
+    echo "No readable CSR suite .summary files under ${results_dir}" >&2
+    return 1
+  fi
+
+  if [ "${saw_failure}" -ne 0 ]; then
+    while IFS= read -r line; do
+      echo "XOAH: ${line}" >&2
+    done < <(grep -rh 'xoah_report_url:' "${results_dir}" 2>/dev/null | sed 's/.*xoah_report_url:[[:space:]]*//' | sort -u)
+    return 1
+  fi
+
+  return 0
+}
+
+if ! check_suite_test_results "${RESULTS_DIR}"; then
+  echo "CSR suite reported test failure(s); see summary and XOAH links above" >&2
+  exit 1
+fi
+
 echo "All RDI runs completed successfully"

@@ -71,6 +71,7 @@ python3 - <<'PY' "${JENKINS_URL}" "${JENKINS_JOB}" "${SPRITE_DIR}" "${DESCRIPTIO
   "${JENKINS_LNX_TA}" "${JENKINS_COMPILE_JOBS_ONLY}" "${JENKINS_BOARD_SELECT}" \
   "${JENKINS_USER}" "${JENKINS_API_TOKEN}" "${CSR_WAIT_TIMEOUT_SEC}"
 import base64
+import http.cookiejar
 import json
 import sys
 import time
@@ -90,23 +91,45 @@ import urllib.request
     token,
     timeout_sec,
 ) = sys.argv[1:11]
+user = user.strip()
+token = token.strip()
 timeout_sec = int(timeout_sec)
 base = jenkins_url.rstrip("/")
 auth = base64.b64encode(f"{user}:{token}".encode()).decode()
 
-
-def request(url, method="GET", data=None, headers=None):
-    req_headers = {"Authorization": f"Basic {auth}"}
-    if headers:
-        req_headers.update(headers)
-    req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = resp.read().decode()
-        return resp, body
+cookie_jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
 
 
-crumb_resp, crumb_body = request(f"{base}/crumbIssuer/api/json")
-crumb = json.loads(crumb_body)
+def request(url, method="GET", data=None, extra_headers=None):
+    headers = {
+        "Authorization": f"Basic {auth}",
+        "Accept": "application/json",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with opener.open(req, timeout=120) as resp:
+            body = resp.read().decode(errors="replace")
+            return resp, body
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        snippet = " ".join(body.split())[:500]
+        raise SystemExit(
+            f"Jenkins HTTP {exc.code} for {method} {url}\n{snippet}"
+        ) from exc
+
+
+def request_json(url, method="GET", data=None, extra_headers=None):
+    _, body = request(url, method=method, data=data, extra_headers=extra_headers)
+    return json.loads(body)
+
+
+whoami = request_json(f"{base}/me/api/json")
+print(f"Jenkins user: {whoami.get('fullName', whoami.get('id', user))}")
+
+crumb = request_json(f"{base}/crumbIssuer/api/json")
 crumb_field = crumb["crumbRequestField"]
 crumb_value = crumb["crumb"]
 
@@ -121,14 +144,17 @@ params = {
     "VE2_DOCKER": "False",
     "VE2_BOOT_IMAGE_PATH": "DEFAULT",
 }
-query = urllib.parse.urlencode(params)
-trigger_url = f"{base}/job/{job_name}/buildWithParameters?{query}"
+trigger_url = f"{base}/job/{job_name}/buildWithParameters"
+form_body = urllib.parse.urlencode(params).encode()
 
 trigger_resp, _ = request(
     trigger_url,
     method="POST",
-    data=b"",
-    headers={crumb_field: crumb_value},
+    data=form_body,
+    extra_headers={
+        crumb_field: crumb_value,
+        "Content-Type": "application/x-www-form-urlencoded",
+    },
 )
 queue_url = trigger_resp.headers.get("Location")
 if not queue_url:
@@ -139,9 +165,8 @@ print(f"Queued Jenkins job: {queue_url.rstrip('/')}/api/json")
 build_url = None
 deadline = time.time() + min(timeout_sec, 600)
 while time.time() < deadline:
-    _, body = request(f"{queue_url.rstrip('/')}/api/json")
-    data = json.loads(body)
-    if "executable" in data and data["executable"]:
+    data = request_json(f"{queue_url.rstrip('/')}/api/json")
+    if data.get("executable"):
         build_url = data["executable"]["url"]
         break
     if data.get("cancelled"):
@@ -156,8 +181,7 @@ print(f"Jenkins build started: {build_url}")
 deadline = time.time() + timeout_sec
 result = None
 while time.time() < deadline:
-    _, body = request(f"{build_url.rstrip('/')}/api/json")
-    data = json.loads(body)
+    data = request_json(f"{build_url.rstrip('/')}/api/json")
     if not data.get("building") and data.get("result") is not None:
         result = data["result"]
         break

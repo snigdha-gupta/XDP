@@ -29,3 +29,7 @@
 # Trial phase: run one XDP design instead of the full VE2_XDP suite (~15 tests).
 # Set empty to run all tests in the merged TQL.
 : "${XDP_CSR_SINGLE_TEST:=ResNet18_MLTimeline}"
+
+# Local RDI trial: native FlexML compile avoids docker.sock on farm hosts.
+# Set to 1 for production docker compile (suite default).
+: "${XDP_CSR_USE_DOCKER:=0}"

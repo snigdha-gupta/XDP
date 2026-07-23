@@ -18,6 +18,7 @@ Environment:
   XDP_CSR_SKIP_JENKINS=1   Generate CSR only; do not submit
   XDP_CSR_SUBMIT_MODE      local (default) or jenkins
   XDP_CSR_SINGLE_TEST      One design under XDP_Suites/test_repo (default: ResNet18_MLTimeline; empty = all)
+  XDP_CSR_USE_DOCKER       0 = native vaiml compile (default trial); 1 = suite docker path
 EOF
 }
 
@@ -72,6 +73,10 @@ bash "${SCRIPT_DIR}/generate_csr_run.sh" --sprite-dir "${SPRITE_DIR}"
 
 echo "== Limit merged TQL to single test (trial) =="
 bash "${SCRIPT_DIR}/limit_merged_tql.sh" --sprite-dir "${SPRITE_DIR}"
+
+echo "== Patch merged TQL for native vaiml compile (no docker) =="
+bash "${SCRIPT_DIR}/patch_merged_tql_no_docker.sh" \
+  --sprite-dir "${SPRITE_DIR}"
 
 echo "== Patch merged TQL for custom XRT install =="
 bash "${SCRIPT_DIR}/patch_merged_tql.sh" \

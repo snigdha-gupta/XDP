@@ -44,12 +44,8 @@ mkdir -p "${SPRITE_DIR}/results"
 chmod a+w "${SPRITE_DIR}" "${SPRITE_DIR}/results"
 chmod a+w "$(dirname "${SPRITE_DIR}")" 2>/dev/null || true
 
-export ENVROOT="${ENVROOT:-/proj/rdi/env/stable/hierdesign}"
-# g_profile can return 126 under bash -e; createSpriteRunLaunch re-sources RDI env.
-# shellcheck disable=SC1091
-set +e
-source "${ENVROOT}/g_profile"
-set -e
+# createSpriteRunLaunch sets up RDI/XTC. Do not source g_profile here: under bash
+# nounset it fails when LD_LIBRARY_PATH is unset (common in GHA runner env).
 umask 022
 
 cd "${SPRITE_DIR}"

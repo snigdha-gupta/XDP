@@ -4,25 +4,31 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [master]
+  # Fork testing: push to this branch runs VE2 build + CSR board test.
+  push:
+    branches: [ci/xdp-multi-platform-builds]
+  workflow_dispatch:
 
 concurrency:
-  group: xdp-build-${{ github.event.pull_request.number }}
+  group: xdp-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-xrt-alveo:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') ||
-      (
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-ve2') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
+      github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') ||
+        (
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-ve2') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
-      group: xdp-alveo-${{ github.event.pull_request.number }}
+      group: xdp-alveo-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: true
 
     steps:
@@ -78,7 +84,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: xrt-alveo-build-pr-${{ github.event.pull_request.number }}
+          name: xrt-alveo-build-${{ github.event.pull_request.number || github.run_id }}
           path: |
             XRT/build/Release/opt/xilinx/xrt/**/libxrt*.so*
             XRT/build/Release/opt/xilinx/xrt/**/libxdp*.so*
@@ -102,17 +108,19 @@ jobs:
 
   build-xrt-edge:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') ||
-      (
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-ve2') &&
-        !contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
+      github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') ||
+        (
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-edge') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-ve2') &&
+          !contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
+        )
       )
     runs-on: [self-hosted, Ubuntu-22.04]
     timeout-minutes: 360
     concurrency:
-      group: xdp-edge-${{ github.event.pull_request.number }}
+      group: xdp-edge-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: true
     env:
       SUDO: /tools/aecg-sudo/sudo/bin/sudo
@@ -155,7 +163,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: xrt-edge-build-pr-${{ github.event.pull_request.number }}
+          name: xrt-edge-build-${{ github.event.pull_request.number || github.run_id }}
           path: |
             XRT/build/versal/rpms/*.rpm
             XRT/build/versal/install_xrt.sh
@@ -179,6 +187,8 @@ jobs:
 
   build-xrt-ve2:
     if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.pull_request.labels.*.name, 'build-xrt-ve2') ||
       (
         !contains(github.event.pull_request.labels.*.name, 'build-xrt-alveo') &&
@@ -189,7 +199,7 @@ jobs:
     runs-on: [self-hosted, Ubuntu-22.04]
     timeout-minutes: 480
     concurrency:
-      group: xdp-ve2-${{ github.event.pull_request.number }}
+      group: xdp-ve2-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: true
     env:
       # Self-hosted runner paths for VE2 Yocto cache (Telluride rev-b / vek385).
@@ -241,7 +251,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: xrt-ve2-build-pr-${{ github.event.pull_request.number }}
+          name: xrt-ve2-build-${{ github.event.pull_request.number || github.run_id }}
           path: ${{ env.VE2_YOCTO_DIR }}/build/tmp/deploy/rpm/cortexa*/xrt*.rpm
           retention-days: 1
 
@@ -264,7 +274,9 @@ jobs:
           fi
 
   build-xrt-client:
-    if: contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'build-xrt-client')
     runs-on: ubuntu-latest
     steps:
       - run: echo "Client build not implemented"
@@ -278,8 +290,54 @@ jobs:
           echo "- Platform: Client" >> "$GITHUB_STEP_SUMMARY"
           echo "- Result: skipped (not implemented)" >> "$GITHUB_STEP_SUMMARY"
 
+  board-test-ve2:
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'board-test-ve2')
+    needs: build-xrt-ve2
+    runs-on: [self-hosted, Ubuntu-22.04]
+    timeout-minutes: 720
+    concurrency:
+      group: xdp-board-ve2-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    env:
+      VE2_YOCTO_CACHE_ROOT: /scratch/snigupta/ve2_yocto_cache
+      VE2_YOCTO_DIR: /scratch/snigupta/ve2_yocto_cache/Vitis-AI-Telluride/versal_2ve/reference_design/vek385/rev-b/sw/yocto
+      CSR_ROOT: /wrk/csr/snigupta/xdp_ci
+      JENKINS_USER: ${{ secrets.JENKINS_USER }}
+      JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+
+    steps:
+      - name: Checkout XDP
+        uses: actions/checkout@v4
+
+      - name: Run VE2 CSR board test
+        env:
+          XDP_CSR_DESCRIPTION: >-
+            XDP ${{ github.event_name }} ${{ github.ref_name }} @ ${{ github.sha }}
+        run: |
+          bash ci/csr/run_ve2_board_test.sh \
+            --run-id '${{ github.event.pull_request.number || github.run_id }}-${{ github.run_id }}'
+
+      - name: Board test summary
+        if: always()
+        run: |
+          RUN_ID='${{ github.event.pull_request.number || github.run_id }}-${{ github.run_id }}'
+          echo "## XDP VE2 Board Test (CSR)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: ${{ github.event_name }} (${{ github.ref_name }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Suite: VE2_XDP (hw)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CSR workspace: ${CSR_ROOT}/pr-${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Jenkins job: csr_submit_job (BOARD_SELECT_RESOURCE=VE2)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- Result: success" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Result: failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   ci-required:
-    if: always()
+    if: always() && github.event_name == 'pull_request'
     needs: [build-xrt-alveo, build-xrt-edge, build-xrt-ve2, build-xrt-client]
     runs-on: ubuntu-latest
     steps:

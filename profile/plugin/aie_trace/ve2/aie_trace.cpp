@@ -1437,9 +1437,7 @@ namespace xdp {
     }
 
     // Build 2-channel broadcast network for trace start synchronization
-    aie::trace::build2ChannelBroadcastNetwork(&aieDevInst, metadata, traceStartBroadcastChId1,  
-                                              traceStartBroadcastChId2, XAIE_EVENT_PERF_CNT_0_PL, 
-                                              startCol, numCols, metadataReader->getNumRows());
+    aie::trace::build2ChannelBroadcastNetwork(&aieDevInst, metadata, traceStartBroadcastChId1, traceStartBroadcastChId2, XAIE_EVENT_PERF_CNT_0_PL, startCol, numCols, metadataReader->getNumRows());
 
     xrt_core::message::send(severity_level::info, "XRT", "Finished AIE Windowed Trace Settings.");
     auto hwContext = metadata->getHwContext();
@@ -1503,6 +1501,7 @@ namespace xdp {
     }
 
     auto metadataReader = (VPDatabase::Instance()->getStaticInfo()).getAIEmetadataReader(deviceId);
+    bool enableMultiLayer = metadataReader && metadataReader->getAIECompilerOptions().enable_multi_layer;
     if (!metadataReader) {
       if (aie::isDebugVerbosity()) {
         std::stringstream msg;
@@ -1510,15 +1509,13 @@ namespace xdp {
         xrt_core::message::send(severity_level::debug, "XRT", msg.str());
       }
     }
-    else if (metadataReader->getAIECompilerOptions().enable_multi_layer) {
+    else if (enableMultiLayer) {
       xrt_core::message::send(severity_level::info, "XRT",
           "Synchronizing AIE timers so trace and ML timeline share a time domain.");
       timerSynchronization(startCol, numCols, metadataReader->getNumRows());
       if (metadata->getTraceStartBroadcast() && metadata->getStartTypeSetting() != "layer")
       {
-        aie::trace::build2ChannelBroadcastNetwork(&aieDevInst, metadata, traceStartBroadcastChId1,
-                                                  traceStartBroadcastChId2, XAIE_EVENT_COMBO_EVENT_0_PL,
-                                                  startCol, numCols, metadataReader->getNumRows());
+        aie::trace::build2ChannelBroadcastNetwork(&aieDevInst, metadata, traceStartBroadcastChId1, traceStartBroadcastChId2, XAIE_EVENT_COMBO_EVENT_0_PL, startCol, numCols, metadataReader->getNumRows());
 
         coreTraceStartEvent = (XAie_Events) (XAIE_EVENT_BROADCAST_0_CORE + traceStartBroadcastChId1);
         memoryTileTraceStartEvent = (XAie_Events) (XAIE_EVENT_BROADCAST_0_MEM_TILE + traceStartBroadcastChId1);
@@ -1713,7 +1710,7 @@ namespace xdp {
         else if (type == module_type::core) {
           // Route core start/stop into memory-module trace via broadcast (same as client/NPU3).
           uint16_t phyBroadcast = 0;
-          if (!(metadataReader && metadataReader->getAIECompilerOptions().enable_multi_layer
+          if (!(enableMultiLayer
                 && metadata->getTraceStartBroadcast()
                 && metadata->getStartTypeSetting() != "layer")) {
             if (XAie_EventBroadcast(&aieDevInst, loc, XAIE_CORE_MOD, 8, traceStartEvent) != XAIE_OK)
@@ -1731,8 +1728,7 @@ namespace xdp {
           firstBroadcastId = 10;
         }
 
-        if (metadataReader && metadataReader->getAIECompilerOptions().enable_multi_layer
-            && type == module_type::core
+        if (enableMultiLayer && type == module_type::core
             && metadata->getTraceStartBroadcast()
             && metadata->getStartTypeSetting() != "layer")
         {
@@ -1895,21 +1891,12 @@ namespace xdp {
           cfgTile->interface_tile_trace_config.traced_events[i] = phyEvent;
         }
 
-        XAie_Events shimTraceStartEvent = interfaceTileTraceStartEvent;
-        if (col == startCol
-            && metadataReader && metadataReader->getAIECompilerOptions().enable_multi_layer
-            && metadata->getTraceStartBroadcast()
-            && metadata->getStartTypeSetting() != "layer")
-        {
-          shimTraceStartEvent = XAIE_EVENT_COMBO_EVENT_0_PL;
-        }
-
         // Update config file
         {
           // Add interface trace control events
           // Start
           uint16_t phyEvent = 0;
-          XAie_EventLogicalToPhysicalConv(&aieDevInst, loc, XAIE_PL_MOD, shimTraceStartEvent, &phyEvent);
+          XAie_EventLogicalToPhysicalConv(&aieDevInst, loc, XAIE_PL_MOD, interfaceTileTraceStartEvent, &phyEvent);
           cfgTile->interface_tile_trace_config.start_event = phyEvent;
           // Stop
           XAie_EventLogicalToPhysicalConv(&aieDevInst, loc, XAIE_PL_MOD, interfaceTileTraceEndEvent, &phyEvent);
@@ -1922,8 +1909,16 @@ namespace xdp {
         XAie_Packet pkt = {0, packetType};
         if (XAie_TracePktConfig(&aieDevInst, loc, mod, pkt) != XAIE_OK)
           break;
-        if (startType != "layer" || startLayer == UINT_MAX) {
-          if (XAie_TraceStartEvent(&aieDevInst, loc, mod, shimTraceStartEvent) != XAIE_OK)
+        if (col == startCol && enableMultiLayer
+            && metadata->getTraceStartBroadcast()
+            && metadata->getStartTypeSetting() != "layer")
+        {
+          if (XAie_TraceStartEvent(&aieDevInst, loc, mod, XAIE_EVENT_COMBO_EVENT_0_PL) != XAIE_OK)
+            break;
+        }
+        else if (startType != "layer" || startLayer == UINT_MAX)
+        {
+          if (XAie_TraceStartEvent(&aieDevInst, loc, mod, interfaceTileTraceStartEvent) != XAIE_OK)
             break;
         }
         if (XAie_TraceStopEvent(&aieDevInst, loc, mod, interfaceTileTraceEndEvent) != XAIE_OK)

@@ -1,4 +1,4 @@
-name: Mirror main to GitHub Enterprise XDP
+name: Mirror master to GitHub Enterprise XDP
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mirror-xdp-main
+  group: mirror-xdp-master
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Push main to enterprise
+      - name: Push master to enterprise
         env:
           ENTERPRISE_TOKEN: ${{ secrets.XDP_ENTERPRISE_TOKEN }}
         run: |
@@ -30,6 +30,6 @@ jobs:
 
           git -c "$hdr" clone https://gitenterprise.xilinx.com/XDP/XDP.git "$RUNNER_TEMP/XDP"
           cd "$RUNNER_TEMP/XDP"
-          git pull --no-rebase https://github.com/snigdha-gupta/XDP.git main
+          git pull --no-rebase https://github.com/snigdha-gupta/XDP.git master
           git -c "$hdr" push origin automated_testing
 

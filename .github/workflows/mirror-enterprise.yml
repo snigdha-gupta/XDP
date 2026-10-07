@@ -2,7 +2,7 @@ name: Mirror main to GitHub Enterprise XDP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch:
 
 permissions:

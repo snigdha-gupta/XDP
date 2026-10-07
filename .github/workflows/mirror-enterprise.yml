@@ -28,8 +28,12 @@ jobs:
           auth=$(printf 'x-access-token:%s' "$ENTERPRISE_TOKEN" | base64 -w0)
           hdr="http.extraHeader=AUTHORIZATION: basic ${auth}"
 
-          git -c "$hdr" clone https://gitenterprise.xilinx.com/XDP/XDP.git "$RUNNER_TEMP/XDP"
+          git -c "$hdr" clone \
+            --branch automated_testing \
+            --single-branch \
+            https://gitenterprise.xilinx.com/XDP/XDP.git \
+            "$RUNNER_TEMP/XDP"
           cd "$RUNNER_TEMP/XDP"
           git pull --no-rebase https://github.com/snigdha-gupta/XDP.git master
-          git -c "$hdr" push origin automated_testing
+          git -c "$hdr" push origin HEAD:automated_testing
 

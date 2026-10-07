@@ -30,6 +30,6 @@ jobs:
 
           git -c "$hdr" clone https://gitenterprise.xilinx.com/XDP/XDP.git "$RUNNER_TEMP/XDP"
           cd "$RUNNER_TEMP/XDP"
-          git pull --no-rebase https://github.com/Xilinx/XDP.git main
+          git pull --no-rebase https://github.com/snigdha-gupta/XDP.git main
           git -c "$hdr" push origin automated_testing
 

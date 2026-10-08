@@ -1,0 +1,39 @@
+name: Mirror master to GitHub Enterprise XDP
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-xdp-master
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: [ self-hosted, Ubuntu-22.04 ]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push master to enterprise
+        env:
+          ENTERPRISE_TOKEN: ${{ secrets.XDP_ENTERPRISE_TOKEN }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$ENTERPRISE_TOKEN" | base64 -w0)
+          hdr="http.extraHeader=AUTHORIZATION: basic ${auth}"
+
+          git -c "$hdr" clone \
+            --branch automated_testing \
+            --single-branch \
+            https://gitenterprise.xilinx.com/XDP/XDP.git \
+            "$RUNNER_TEMP/XDP"
+          cd "$RUNNER_TEMP/XDP"
+          git pull --no-rebase https://github.com/snigdha-gupta/XDP.git master
+          git -c "$hdr" push origin HEAD:automated_testing
+
